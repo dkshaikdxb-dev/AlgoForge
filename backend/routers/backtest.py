@@ -1,4 +1,5 @@
 """Backtest run + history."""
+import logging
 import uuid
 from typing import Optional
 
@@ -10,6 +11,7 @@ from backtest_engine import run_backtest
 from db import get_db, now_iso
 
 router = APIRouter(tags=["backtest"])
+logger = logging.getLogger("algoforge.backtest")
 
 
 class BacktestRequest(BaseModel):
@@ -34,6 +36,8 @@ async def backtest_run(req: BacktestRequest, user: dict = Depends(get_current_us
             days=req.days,
         )
     except (KeyError, ValueError, TypeError, AttributeError) as e:
+        # Log with stack so genuine engine bugs aren't silently masked as "bad DSL".
+        logger.warning("Backtest rejected for user=%s: %s", user.get("id"), e, exc_info=True)
         raise HTTPException(400, f"Invalid strategy DSL: {e}")
     if not result or result.get("error"):
         raise HTTPException(400, (result or {}).get("error", "Backtest produced no result"))

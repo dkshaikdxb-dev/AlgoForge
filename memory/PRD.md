@@ -80,3 +80,18 @@ Build a modular & scalable AI-first hybrid algorithmic trading platform with: da
 - **P1**: Audit-log viewer (SEBI-style trace).
 - **P1**: Monte Carlo stress tester.
 - **P1**: Move paper-trading logic into `services/`.
+
+## Iteration 5 (2026-02-29) — Code-review cleanup
+- **Critical fixes**:
+  - `tests/backend_test.py` — hardcoded demo password → `ALGOFORGE_TEST_EMAIL/PASSWORD` env vars (defaults preserved).
+  - `routers/backtest.py` — `result` defensively initialised; `AttributeError` caught (was 500, now 400) with logged stack trace so engine bugs aren't silently masked.
+  - `db.py` — explicit `_db: Any = None` + `is not None` guard.
+  - `brokers/rmoney.py` — `r` → `response` (clarity).
+  - `backtest_engine.py` — ambiguous `l` → `loss` / `left` (ruff E741).
+- **Frontend**:
+  - Empty `catch {}` in `useTickStream.js` and `Backtest.jsx` → `console.warn` with context.
+  - React `key={i}` array-index keys → stable composite keys (date+side+i, side+strike, tag text, leg `_key` UUID) in 9 locations.
+  - `MultiLegBuilder` strips client-only `_key` field before POSTing (Pydantic extra='ignore' covers it; belt-and-suspenders).
+  - `lib/api.js` already auto-attaches `Idempotency-Key` UUID per paper-order POST.
+- **Deferred (non-bugs, would risk regression)**: 5 component-complexity refactors (Backtest/PaperExecution/Brokers/Dashboard/MultiLegBuilder splits), `run_backtest`/`scan_traps`/`get_options_chain` function extractions, localStorage → httpOnly cookie auth migration (requires CSRF middleware + backend cookie session rework).
+- **Tests**: 59/59 backend pass (+8 new in TestIter5CodeReviewFixes). Lint clean across both stacks.
