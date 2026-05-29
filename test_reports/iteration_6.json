@@ -1,0 +1,47 @@
+{
+  "summary": "Iteration 6 — Broker adapter prep & reconciliation. Added TestIter6BrokerAdapterPrep with 12 tests covering capability chips, /api/reconciliation/{summary,log,run/{broker}}, NormalizedOrder Pydantic shape, BrokerAdapter ABC abstractness, PaperAdapter via ABC, circuit-breaker (3 failures → BrokerUnavailable), and retry-with-jitter (success on 3rd attempt). All 12 new tests pass. 58/59 prior tests pass; the 1 remaining failure is a pre-existing iter5 issue (broken module import path, unrelated to iter6).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "tests/backend_test.py::TestIter5CodeReviewFixes::test_env_var_test_credentials_default",
+        "issue": "Pre-existing iter5 test failure: `from backend.tests import backend_test as bt` — module path 'backend' does not exist under pytest's rootdir (/app/backend). Test should use `from tests import backend_test as bt` or rely on module-level constants directly. Not introduced by iter6."
+      },
+      {
+        "endpoint": "tests/backend_test.py::TestIdempotency::test_auto_idempotency_without_header",
+        "issue": "Flaky in iter5 (passed this run, failed in the iter5-only run earlier). Root cause: auto-derived idempotency key hashes collide with prior demo-user orders accumulated in DB across runs. Pre-existing; recommend adding pre-test `/api/paper/flatten` + clearing idempotency_log OR a per-test unique tag."
+      },
+      {
+        "endpoint": "/app/backend/brokers/registry.py SUPPORTED['dhan']",
+        "issue": "dhan entry has no `capabilities` key, so /api/brokers returns `capabilities: {}` for dhan. Frontend chips would render nothing for dhan. Consider adding an explicit capability dict (even if conservative defaults) for parity with the other 4 brokers."
+      }
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "(Optional, not iter6) Fix import in test_env_var_test_credentials_default to use `from tests import backend_test as bt`.",
+    "(Optional, not iter6) Stabilise test_auto_idempotency_without_header by flattening + clearing idempotency keys before the test, or use a fresh tag/symbol per run.",
+    "(Nice-to-have) Add a `capabilities` block for 'dhan' in brokers/registry.py SUPPORTED — currently empty, while spec contemplated capability chips per broker."
+  ],
+  "critical_code_review_comments": [
+    "brokers/base.py — call_with_retry: when an unexpected (non-BrokerError) exception is raised, it's wrapped as BrokerUnexpectedError and re-raised but is NOT retried even though it counts as a failure for the breaker. Acceptable; documented.",
+    "services/reconciliation.py — reconcile_orders writes to `live_orders` collection which doesn't yet exist. Currently safe (empty find) but consider creating an index up-front to avoid first-write latency in prod.",
+    "routers/reconciliation.py — `adapter.user_id = user['id']` is mutated post-construction for legacy adapters; works but couples legacy and ABC paths. Once legacy adapters migrate to BrokerAdapter ABC, push user_id into the constructor signature uniformly.",
+    "brokers/registry.py — `dhan` missing `capabilities` dict → /api/brokers returns `{}` for that broker (no chips rendered).",
+    "schemas.py NormalizedOrder uses `use_enum_values=True`, so calling `o.status` returns the string already. Tests confirm 'FILLED' serialises as string."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py (appended TestIter6BrokerAdapterPrep — 12 tests)"
+  ],
+  "success_rate": {"backend": "70/71 = 98.6% (all 12 iter6 tests pass; 1 pre-existing iter5 import-path failure)", "frontend": "not tested (backend-only per request)"},
+  "test_credentials": "demo@algoforge.io / Demo@123 (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "None. Tests use the seeded demo user. /api/paper/flatten is called inside test_paper_adapter_place_order_via_abc to keep state predictable.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "TestIter6BrokerAdapterPrep is appended at the end of /app/backend/tests/backend_test.py. The circuit-breaker test directly mutates brokers.base._breakers (clears keys before/after). Run all tests with: `set -a; source /app/backend/.env; set +a; pytest /app/backend/tests/backend_test.py -v`. Two pre-existing flaky/broken tests are tracked under backend_issues.minor and are NOT iter6 regressions.",
+  "rca of the issue": "N/A — no iter6 functional bug. The 1 failing test (test_env_var_test_credentials_default) has been failing since iter5: it imports `backend.tests.backend_test` but pytest's rootdir is /app/backend so the package path is `tests.backend_test`. Fix is a one-liner."
+}

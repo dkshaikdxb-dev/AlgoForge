@@ -75,6 +75,35 @@ export default function Brokers() {
     }
   };
 
+  const reconcile = async (name) => {
+    setBusy(true);
+    try {
+      const { data } = await api.post(`/reconciliation/run/${name}`);
+      if (data.state === "NOT_APPLICABLE") {
+        toast.info(`${name}: paper broker (no reconciliation needed)`);
+      } else if (data.state === "PENDING_RECONCILE") {
+        toast.warning(`${name}: ${data.note || "awaiting live adapter"}`);
+      } else if (data.state === "FAILED") {
+        toast.error(`${name}: reconcile failed — ${data.error}`);
+      } else {
+        toast.success(`${name}: ${data.checked} orders checked, ${data.actions.length} actions`);
+      }
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Reconcile failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const CAP_LABELS = {
+    supports_modify: "modify",
+    supports_amo: "AMO",
+    supports_iceberg: "iceberg",
+    supports_basket_native: "native basket",
+    supports_postback_ws: "WS postback",
+    supports_options_multi_leg: "multi-leg",
+  };
+
   const statusLabel = (it) => {
     if (!it.connected) return { label: "DISCONNECTED", color: "text-zinc-500", dot: "bg-zinc-600" };
     if (it.status === "live") return { label: "LIVE", color: "txt-profit", dot: "bg-emerald-500" };
@@ -130,6 +159,17 @@ export default function Brokers() {
                         <ShieldCheck className="w-3.5 h-3.5 mr-2" /> TEST
                       </Button>
                       <Button
+                        data-testid={`broker-reconcile-${b.name}`}
+                        onClick={() => reconcile(b.name)}
+                        disabled={busy}
+                        size="sm"
+                        variant="ghost"
+                        className="rounded-none text-zinc-400 hover:text-white"
+                        title="Reconcile order book with broker"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                      </Button>
+                      <Button
                         data-testid={`broker-disconnect-${b.name}`}
                         onClick={() => disconnect(b.name)}
                         size="sm"
@@ -150,6 +190,17 @@ export default function Brokers() {
                     Docs <ExternalLink className="w-3 h-3" />
                   </a>
                 </div>
+                {b.capabilities && Object.values(b.capabilities).some(Boolean) && (
+                  <div className="border-t border-[var(--border)] pt-3 flex flex-wrap gap-1.5">
+                    {Object.entries(CAP_LABELS).map(([k, label]) => (
+                      b.capabilities[k] ? (
+                        <span key={k} className="text-[10px] uppercase tracking-wider px-2 py-0.5 border border-[var(--border)] txt-secondary font-mono-data inline-flex items-center gap-1">
+                          <Check className="w-3 h-3 txt-profit" /> {label}
+                        </span>
+                      ) : null
+                    ))}
+                  </div>
+                )}
                 {b.sdk_package && (
                   <div className="text-[11px] txt-muted font-mono-data border-t border-[var(--border)] pt-2">
                     SDK: {b.sdk_package}

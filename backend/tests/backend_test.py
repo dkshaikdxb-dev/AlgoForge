@@ -949,3 +949,237 @@ class TestIter5CodeReviewFixes:
                 os.environ.pop("ALGOFORGE_TEST_PASSWORD", None)
             else:
                 os.environ["ALGOFORGE_TEST_PASSWORD"] = prev_pw
+
+
+
+# ============================================================================
+# Iteration 6 — Broker Adapter Prep, Reconciliation, Capabilities
+# ============================================================================
+class TestIter6BrokerAdapterPrep:
+    """P0 broker prep: capabilities, reconciliation endpoints, ABC, retry, circuit breaker."""
+
+    # --- (A) /api/brokers capabilities exposed -----------------------------
+    def test_brokers_capabilities_chip(self, auth):
+        r = auth.get(f"{BASE_URL}/api/brokers")
+        assert r.status_code == 200, r.text
+        items = {b["name"]: b for b in r.json()["items"]}
+        # Zerodha — all True
+        zcaps = items["zerodha"]["capabilities"]
+        for k in ("supports_modify", "supports_amo", "supports_iceberg",
+                  "supports_basket_native", "supports_postback_ws",
+                  "supports_options", "supports_options_multi_leg"):
+            assert zcaps.get(k) is True, f"zerodha.{k} expected True, got {zcaps.get(k)}"
+        # Rmoney — only supports_options=True
+        rcaps = items["rmoney"]["capabilities"]
+        assert rcaps.get("supports_options") is True
+        for k in ("supports_modify", "supports_amo", "supports_iceberg",
+                  "supports_basket_native", "supports_postback_ws",
+                  "supports_options_multi_leg"):
+            assert rcaps.get(k) is False, f"rmoney.{k} expected False, got {rcaps.get(k)}"
+
+    # --- (B) /api/reconciliation/summary ----------------------------------
+    def test_reconciliation_summary_shape(self, auth):
+        r = auth.get(f"{BASE_URL}/api/reconciliation/summary")
+        assert r.status_code == 200, r.text
+        d = r.json()
+        assert "connected_brokers" in d and isinstance(d["connected_brokers"], list)
+        assert "counts_by_state" in d
+        for s in ("SYNCED", "PENDING_RECONCILE", "OUT_OF_SYNC",
+                  "RECONCILED", "FAILED", "NOT_APPLICABLE"):
+            assert s in d["counts_by_state"], f"missing state {s}"
+            assert isinstance(d["counts_by_state"][s], int)
+
+    # --- (C) Reconcile paper → NOT_APPLICABLE + audit row -----------------
+    def test_reconciliation_run_paper_noop(self, auth):
+        r = auth.post(f"{BASE_URL}/api/reconciliation/run/paper")
+        assert r.status_code == 200, r.text
+        d = r.json()
+        assert d["state"] == "NOT_APPLICABLE", d
+        assert d["checked"] == 0
+        assert d["actions"] == []
+
+        # Audit row created
+        lr = auth.get(f"{BASE_URL}/api/reconciliation/log", params={"broker": "paper"})
+        assert lr.status_code == 200
+        items = lr.json()["items"]
+        assert len(items) >= 1
+        latest = items[0]
+        assert latest["broker"] == "paper"
+        assert latest["action_taken"] == "NO_OP"
+        assert "ts" in latest and "reason" in latest
+
+    # --- (D) Reconcile zerodha (legacy adapter) → PENDING_RECONCILE -------
+    def test_reconciliation_run_zerodha_legacy_adapter(self, auth):
+        # Ensure connected with dummy creds
+        auth.delete(f"{BASE_URL}/api/brokers/zerodha")
+        cr = auth.post(f"{BASE_URL}/api/brokers/zerodha/connect", json={
+            "credentials": {"api_key": "k", "api_secret": "s", "access_token": "t"}
+        })
+        assert cr.status_code == 200, cr.text
+        try:
+            r = auth.post(f"{BASE_URL}/api/reconciliation/run/zerodha")
+            assert r.status_code == 200, r.text
+            d = r.json()
+            assert d["state"] == "PENDING_RECONCILE", d
+            assert "live broker adapter" in d.get("note", "").lower(), d
+            # Audit row with ADAPTER_LEGACY
+            lr = auth.get(f"{BASE_URL}/api/reconciliation/log", params={"broker": "zerodha"})
+            items = lr.json()["items"]
+            assert any(it.get("action_taken") == "ADAPTER_LEGACY" for it in items), items[:3]
+        finally:
+            auth.delete(f"{BASE_URL}/api/brokers/zerodha")
+
+    # --- (E) Reconcile not-connected broker → 404 -------------------------
+    def test_reconciliation_run_unconnected_404(self, auth):
+        # Ensure clean
+        auth.delete(f"{BASE_URL}/api/brokers/upstox")
+        r = auth.post(f"{BASE_URL}/api/reconciliation/run/upstox")
+        assert r.status_code == 404, r.text
+        assert "not connected" in r.json().get("detail", "").lower()
+
+    # --- (F) Log filter ?broker= works ------------------------------------
+    def test_reconciliation_log_broker_filter(self, auth):
+        # Generate at least one paper entry to filter on
+        auth.post(f"{BASE_URL}/api/reconciliation/run/paper")
+        r = auth.get(f"{BASE_URL}/api/reconciliation/log", params={"broker": "paper"})
+        assert r.status_code == 200
+        items = r.json()["items"]
+        assert all(it["broker"] == "paper" for it in items), \
+            f"filter broken: {[(it['broker']) for it in items]}"
+        for it in items[:3]:
+            for k in ("broker", "action_taken", "ts"):
+                assert k in it, f"missing {k}: {it}"
+
+    # --- (G) Pydantic NormalizedOrder sanity ------------------------------
+    def test_normalized_order_pydantic(self):
+        import os as _os
+        _os.environ.setdefault("ENCRYPTION_KEY", "test-key-placeholder")
+        import sys
+        sys.path.insert(0, "/app/backend")
+        from brokers.schemas import NormalizedOrder, OrderStatus
+        o = NormalizedOrder(
+            id="oid-1", user_id="u1", broker="paper",
+            symbol="NIFTY", side="BUY", qty=50,
+            status=OrderStatus.FILLED,
+        )
+        # enum serialises as string with use_enum_values=True
+        dumped = o.model_dump()
+        assert dumped["status"] == "FILLED"
+        assert isinstance(dumped["status"], str)
+        assert dumped["symbol"] == "NIFTY"
+        assert dumped["qty"] == 50
+
+    # --- (H) BrokerAdapter ABC cannot be instantiated ---------------------
+    def test_broker_adapter_abc_not_instantiable(self):
+        import sys
+        sys.path.insert(0, "/app/backend")
+        from brokers.base import BrokerAdapter
+        with pytest.raises(TypeError) as exc:
+            BrokerAdapter({})
+        assert "abstract" in str(exc.value).lower()
+
+    # --- (I) PaperAdapter capabilities + test_connection ------------------
+    def test_paper_adapter_capabilities_and_connection(self):
+        import asyncio, sys
+        sys.path.insert(0, "/app/backend")
+        from brokers.paper_adapter import PaperAdapter
+        from brokers.schemas import BrokerCapabilities
+        adapter = PaperAdapter({}, user_id="u-test")
+        caps = adapter.capabilities()
+        assert isinstance(caps, BrokerCapabilities)
+        assert caps.supports_options_multi_leg is True
+        result = asyncio.run(adapter.test_connection())
+        assert result.get("ok") is True
+
+    # --- (J) PaperAdapter.place_order via ABC interface -------------------
+    def test_paper_adapter_place_order_via_abc(self, auth):
+        # Flatten first to avoid duplicate-window issues
+        auth.post(f"{BASE_URL}/api/paper/flatten")
+        time.sleep(0.5)
+
+        # Issue order over HTTP (existing flow) -- we then verify the adapter
+        # produces a NormalizedOrder shape in-process.
+        import asyncio, sys, os as _os
+        sys.path.insert(0, "/app/backend")
+        from brokers.paper_adapter import PaperAdapter
+        from brokers.schemas import NormalizedOrderRequest, OrderStatus, ReconciliationState
+
+        # Get demo user id by hitting /me
+        me = auth.get(f"{BASE_URL}/api/auth/me").json()
+        adapter = PaperAdapter({}, user_id=me["id"])
+        req = NormalizedOrderRequest(symbol="NIFTY", side="BUY", qty=50,
+                                     instrument_type="EQ", order_type="MARKET")
+        no = asyncio.run(adapter.place_order(req))
+        assert no.status == OrderStatus.FILLED.value or no.status == "FILLED"
+        assert no.reconciliation_state in (
+            ReconciliationState.NOT_APPLICABLE.value, "NOT_APPLICABLE"
+        )
+        assert no.symbol == "NIFTY"
+        assert no.qty == 50
+        assert no.broker == "paper"
+
+        # And the order shows up via /api/paper/orders
+        r = auth.get(f"{BASE_URL}/api/paper/orders")
+        assert r.status_code == 200
+        orders = r.json().get("items") or r.json().get("orders") or r.json()
+        assert any(o.get("id") == no.id or o.get("id") == no.broker_order_id
+                   for o in (orders if isinstance(orders, list) else []))
+
+    # --- (K) Circuit breaker opens after 3 failures in 30s ---------------
+    def test_circuit_breaker_opens_on_3_failures(self):
+        import asyncio, sys
+        sys.path.insert(0, "/app/backend")
+        import brokers.base as bb
+        from brokers.base import (
+            call_with_retry, BrokerNetworkError, BrokerUnavailable,
+        )
+        # Clear any prior state for our fake key
+        user_id = "TEST_breaker_user"
+        broker = "fakebr"
+        bb._breakers.pop((user_id, broker), None)
+
+        async def always_fail():
+            raise BrokerNetworkError("simulated")
+
+        async def run():
+            # max_attempts=1 so each call_with_retry records exactly one failure
+            for _ in range(3):
+                with pytest.raises(BrokerNetworkError):
+                    await call_with_retry(always_fail, user_id=user_id,
+                                          broker=broker, max_attempts=1)
+            # 4th call should be short-circuited
+            with pytest.raises(BrokerUnavailable) as exc:
+                await call_with_retry(always_fail, user_id=user_id,
+                                      broker=broker, max_attempts=1)
+            assert "circuit open" in str(exc.value).lower()
+
+        asyncio.run(run())
+        # cleanup
+        bb._breakers.pop((user_id, broker), None)
+
+    # --- (L) Retry policy succeeds on 3rd attempt after 2 network errors --
+    def test_retry_policy_succeeds_on_third_attempt(self):
+        import asyncio, sys
+        sys.path.insert(0, "/app/backend")
+        import brokers.base as bb
+        from brokers.base import call_with_retry, BrokerNetworkError
+
+        user_id = "TEST_retry_user"
+        broker = "fakebr2"
+        bb._breakers.pop((user_id, broker), None)
+
+        state = {"n": 0}
+
+        async def flaky():
+            state["n"] += 1
+            if state["n"] < 3:
+                raise BrokerNetworkError(f"fail #{state['n']}")
+            return "ok"
+
+        result = asyncio.run(call_with_retry(
+            flaky, user_id=user_id, broker=broker,
+            max_attempts=3, base_delay=0.01,
+        ))
+        assert result == "ok"
+        assert state["n"] == 3
+        bb._breakers.pop((user_id, broker), None)

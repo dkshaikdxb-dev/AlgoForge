@@ -12,6 +12,11 @@ from .rmoney import RmoneyClient
 SUPPORTED: dict[str, dict] = {
     "zerodha": {
         "client": ZerodhaClient,
+        "capabilities": {
+            "supports_modify": True, "supports_amo": True, "supports_iceberg": True,
+            "supports_basket_native": True, "supports_postback_ws": True,
+            "supports_options": True, "supports_options_multi_leg": True,
+        },
         "info": BrokerInfo(
             name="zerodha",
             label="Zerodha Kite",
@@ -27,6 +32,11 @@ SUPPORTED: dict[str, dict] = {
     },
     "upstox": {
         "client": UpstoxClient,
+        "capabilities": {
+            "supports_modify": True, "supports_amo": True, "supports_iceberg": True,
+            "supports_basket_native": False, "supports_postback_ws": True,
+            "supports_options": True, "supports_options_multi_leg": True,
+        },
         "info": BrokerInfo(
             name="upstox",
             label="Upstox",
@@ -56,6 +66,11 @@ SUPPORTED: dict[str, dict] = {
     },
     "icici": {
         "client": ICICIDirectClient,
+        "capabilities": {
+            "supports_modify": True, "supports_amo": False, "supports_iceberg": False,
+            "supports_basket_native": False, "supports_postback_ws": False,
+            "supports_options": True, "supports_options_multi_leg": True,
+        },
         "info": BrokerInfo(
             name="icici",
             label="ICICI Direct Breeze",
@@ -71,6 +86,11 @@ SUPPORTED: dict[str, dict] = {
     },
     "rmoney": {
         "client": RmoneyClient,
+        "capabilities": {
+            "supports_modify": False, "supports_amo": False, "supports_iceberg": False,
+            "supports_basket_native": False, "supports_postback_ws": False,
+            "supports_options": True, "supports_options_multi_leg": False,
+        },
         "info": BrokerInfo(
             name="rmoney",
             label="Rmoney (R-Money Plus)",
@@ -98,6 +118,7 @@ def list_brokers() -> list[dict]:
             "fields": info.fields,
             "sdk_package": info.sdk_package,
             "docs_url": info.docs_url,
+            "capabilities": entry.get("capabilities", {}),
         })
     return out
 

@@ -28,6 +28,7 @@ from routers import (
     journal as journal_router,
     market as market_router,
     paper as paper_router,
+    reconciliation as reconciliation_router,
     risk as risk_router,
     strategies as strategies_router,
     trap as trap_router,
@@ -61,6 +62,7 @@ api.include_router(trap_router.router)
 api.include_router(paper_router.router)
 api.include_router(journal_router.router)
 api.include_router(brokers_router.router)
+api.include_router(reconciliation_router.router)
 api.include_router(dashboard_router.router)
 app.include_router(api)
 
