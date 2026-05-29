@@ -58,3 +58,10 @@ Build a modular & scalable AI-first hybrid algorithmic trading platform with: da
 ## Remaining P0
 - Real Zerodha/Upstox/Dhan/ICICI/Rmoney **live** wiring (awaiting API keys + KYC + SDK installs).
 - WS upgrade from mock to real broker tick streams once any broker is live.
+
+## Iteration 3 (2026-02-29) — Refactor: routers/
+- Split monolithic `server.py` (~600 lines) into 11 per-domain routers under `/app/backend/routers/`:
+  health · market · strategies · backtest · risk · trap · paper · journal · brokers · dashboard (+ standalone auth, ws_feed).
+- `server.py` is now ~80 lines: imports, router mounting, CORS, lifecycle.
+- Shared async helpers `place_paper_order()` and `compute_positions()` live in `routers/paper.py` and are reused by multi-leg + dashboard (direct calls, no nested HTTP).
+- 34/34 backend regression PASS — zero behavior change.
