@@ -36,6 +36,7 @@ from routers import (
     trap as trap_router,
 )
 from services.audit import _ensure_indexes as _audit_ensure_indexes
+from services.reconciler_loop import reconciler_loop
 from ws_feed import router as ws_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s — %(message)s")
@@ -44,12 +45,22 @@ logger = logging.getLogger("algoforge")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import asyncio as _asyncio
+
     get_db()
     await paper_router._ensure_idempotency_ttl()
     await _audit_ensure_indexes()
-    logger.info("AlgoForge backend started (modular routers, idempotency TTL ready, audit indexed)")
-    yield
-    close_db()
+    rec_task = _asyncio.create_task(reconciler_loop())
+    logger.info("AlgoForge backend started (modular routers, idempotency TTL ready, audit indexed, reconciler running)")
+    try:
+        yield
+    finally:
+        rec_task.cancel()
+        try:
+            await rec_task
+        except (_asyncio.CancelledError, Exception):
+            pass
+        close_db()
 
 
 app = FastAPI(title="AlgoForge — AI Trading Platform", lifespan=lifespan)

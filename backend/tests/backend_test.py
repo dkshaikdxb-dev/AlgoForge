@@ -328,13 +328,17 @@ class TestBrokers:
         assert z["connected"] is True
         assert z["status"] in ("saved", "live", "error")
 
-        # test connection -> should fail gracefully (SDK not installed)
+        # test connection -> should fail gracefully with status=error
+        # (iter 9: kiteconnect SDK now installed; fake creds → BrokerAuthError → classified as "error")
         r3 = auth.post(f"{BASE_URL}/api/brokers/zerodha/test")
         assert r3.status_code == 200, r3.text
         d3 = r3.json()
         assert d3["status"] == "error", d3
         msg = d3.get("message", "").lower()
-        assert "kiteconnect" in msg or "sdk" in msg or "not installed" in msg, f"unexpected msg: {msg}"
+        assert any(
+            keyword in msg for keyword in ("kiteconnect", "sdk", "not installed",
+                                            "api_key", "access_token", "auth", "incorrect")
+        ), f"unexpected msg: {msg}"
 
         # delete
         r4 = auth.delete(f"{BASE_URL}/api/brokers/zerodha")
@@ -1005,8 +1009,11 @@ class TestIter6BrokerAdapterPrep:
         assert latest["action_taken"] == "NO_OP"
         assert "ts" in latest and "reason" in latest
 
-    # --- (D) Reconcile zerodha (legacy adapter) → PENDING_RECONCILE -------
-    def test_reconciliation_run_zerodha_legacy_adapter(self, auth):
+    # --- (D) Reconcile zerodha (real BrokerAdapter, fake creds) → FAILED --
+    # NOTE (iter 9): zerodha is now a full BrokerAdapter. With fake creds the
+    # adapter attempts get_orders() which raises BrokerAuthError → reconciler
+    # logs FETCH_FAILED and returns state=FAILED (was PENDING_RECONCILE/ADAPTER_LEGACY).
+    def test_reconciliation_run_zerodha_real_adapter_auth_fails(self, auth):
         # Ensure connected with dummy creds
         auth.delete(f"{BASE_URL}/api/brokers/zerodha")
         cr = auth.post(f"{BASE_URL}/api/brokers/zerodha/connect", json={
@@ -1017,12 +1024,12 @@ class TestIter6BrokerAdapterPrep:
             r = auth.post(f"{BASE_URL}/api/reconciliation/run/zerodha")
             assert r.status_code == 200, r.text
             d = r.json()
-            assert d["state"] == "PENDING_RECONCILE", d
-            assert "live broker adapter" in d.get("note", "").lower(), d
-            # Audit row with ADAPTER_LEGACY
+            assert d["state"] == "FAILED", d
+            assert "error" in d, d
+            # Audit row with FETCH_FAILED
             lr = auth.get(f"{BASE_URL}/api/reconciliation/log", params={"broker": "zerodha"})
             items = lr.json()["items"]
-            assert any(it.get("action_taken") == "ADAPTER_LEGACY" for it in items), items[:3]
+            assert any(it.get("action_taken") == "FETCH_FAILED" for it in items), items[:3]
         finally:
             auth.delete(f"{BASE_URL}/api/brokers/zerodha")
 
@@ -1784,3 +1791,149 @@ class TestIter8MonteCarloStress:
         r = session.post(f"{BASE_URL}/api/stress/run",
                          json={"backtest": backtest_result, "iterations": 60})
         assert r.status_code in (401, 403)
+
+
+# =====================================================================
+# Iter 9 — P1 service refactor + P0 BrokerAdapter rollout
+# =====================================================================
+class TestIter9Refactor:
+    """P1: paper-trading business logic moved to services/paper_trading.
+    P0: zerodha & upstox now inherit BrokerAdapter. Reconciler loop runs
+    in lifespan startup."""
+
+    # --- (A) Module-level imports work (P1 contract) ----------------
+    def test_services_paper_trading_exports(self):
+        from services.paper_trading import (
+            place_paper_order,
+            compute_positions,
+            idem_lookup,
+            idem_store,
+            ensure_idempotency_ttl,
+            signature,
+            check_kill_switch,
+            apply_to_position,
+            resolve_price,
+            undo_order,
+            PaperOrderRequest,
+            MultiLegOrderRequest,
+        )
+        assert callable(place_paper_order)
+        assert callable(compute_positions)
+        assert callable(ensure_idempotency_ttl)
+
+    def test_router_paper_reexports_lifespan_helper(self):
+        # server.py depends on this re-export at startup
+        from routers.paper import _ensure_idempotency_ttl
+        assert callable(_ensure_idempotency_ttl)
+
+    def test_dashboard_router_imports_compute_positions_from_services(self):
+        import routers.dashboard as dash
+        from services.paper_trading import compute_positions
+        # Confirm dashboard uses the moved symbol (not its own copy)
+        assert getattr(dash, "compute_positions", None) is compute_positions
+
+    def test_paper_adapter_uses_services(self):
+        from brokers.paper_adapter import PaperAdapter
+        from services.paper_trading import place_paper_order, PaperOrderRequest
+        # Just import-level smoke: no instantiation of HTTP machinery
+        assert PaperAdapter is not None
+        assert callable(place_paper_order)
+        assert PaperOrderRequest is not None
+
+    # --- (B) Zerodha adapter conforms to BrokerAdapter ABC (P0) -----
+    def test_zerodha_is_broker_adapter(self):
+        from brokers.zerodha import ZerodhaClient
+        from brokers.base import BrokerAdapter
+        c = ZerodhaClient({"api_key": "k", "api_secret": "s", "access_token": "t"},
+                          user_id="u")
+        assert isinstance(c, BrokerAdapter)
+        caps = c.capabilities()
+        assert caps.supports_modify is True
+        assert caps.supports_basket_native is True
+        assert caps.supports_postback_ws is True
+
+    def test_zerodha_test_connection_raises_broker_auth_error(self):
+        import asyncio
+        from brokers.zerodha import ZerodhaClient
+        from brokers.base import BrokerAuthError, BrokerUnavailable
+        c = ZerodhaClient({"api_key": "k", "api_secret": "s", "access_token": "t"},
+                          user_id="u")
+        # With kiteconnect installed but fake creds → BrokerAuthError.
+        # If SDK is missing for any reason, BrokerUnavailable is acceptable.
+        with pytest.raises((BrokerAuthError, BrokerUnavailable)):
+            asyncio.run(c.test_connection())
+
+    # --- (C) Upstox adapter conforms to BrokerAdapter ABC (P0) ------
+    def test_upstox_is_broker_adapter(self):
+        from brokers.upstox import UpstoxClient
+        from brokers.base import BrokerAdapter
+        c = UpstoxClient({"api_key": "k", "api_secret": "s", "access_token": "t"},
+                         user_id="u")
+        assert isinstance(c, BrokerAdapter)
+        caps = c.capabilities()
+        assert caps.supports_postback_ws is True
+
+    def test_upstox_without_access_token_raises_unavailable(self):
+        import asyncio
+        from brokers.upstox import UpstoxClient
+        from brokers.base import BrokerUnavailable
+        c = UpstoxClient({"api_key": "k", "api_secret": "s"}, user_id="u")
+        with pytest.raises(BrokerUnavailable):
+            asyncio.run(c.test_connection())
+
+    # --- (D) Reconciler loop module + tick helper -------------------
+    def test_reconciler_loop_imports(self):
+        from services.reconciler_loop import reconciler_loop, reconciler_tick
+        assert callable(reconciler_loop)
+        assert callable(reconciler_tick)
+
+    def test_reconciler_tick_no_live_brokers_returns_zero(self, auth):
+        """When no broker_connections have status='live', tick returns 0
+        and does NOT raise. Run in a subprocess to get a clean event loop
+        (motor singleton in get_db() is bound to FastAPI's lifespan loop)."""
+        import subprocess, sys, os
+        script = (
+            "import asyncio, os, sys\n"
+            "sys.path.insert(0, '/app/backend')\n"
+            "from motor.motor_asyncio import AsyncIOMotorClient\n"
+            "from services.reconciler_loop import reconciler_tick\n"
+            "async def run():\n"
+            "    client = AsyncIOMotorClient(os.environ['MONGO_URL'])\n"
+            "    db = client[os.environ['DB_NAME']]\n"
+            "    live = await db.broker_connections.find({'status':'live'}).to_list(100)\n"
+            "    for rec in live:\n"
+            "        await db.broker_connections.update_one({'_id': rec['_id']}, {'$set': {'status':'_iter9_demoted'}})\n"
+            "    try:\n"
+            "        n = await reconciler_tick()\n"
+            "        print('TICK_RESULT=' + str(n))\n"
+            "    finally:\n"
+            "        for rec in live:\n"
+            "            await db.broker_connections.update_one({'_id': rec['_id']}, {'$set': {'status': rec['status']}})\n"
+            "asyncio.run(run())\n"
+        )
+        env = {**os.environ}
+        proc = subprocess.run([sys.executable, "-c", script], capture_output=True,
+                              text=True, env=env, timeout=30)
+        assert proc.returncode == 0, f"stdout={proc.stdout}\nstderr={proc.stderr}"
+        assert "TICK_RESULT=0" in proc.stdout, proc.stdout
+
+    # --- (E) HTTP smoke: connect zerodha with fake creds → status=error
+    def test_zerodha_connect_and_test_classified_as_error(self, auth):
+        auth.delete(f"{BASE_URL}/api/brokers/zerodha")
+        cr = auth.post(f"{BASE_URL}/api/brokers/zerodha/connect", json={
+            "credentials": {"api_key": "k", "api_secret": "s", "access_token": "t"}
+        })
+        assert cr.status_code == 200, cr.text
+        try:
+            tr = auth.post(f"{BASE_URL}/api/brokers/zerodha/test")
+            assert tr.status_code == 200, tr.text
+            body = tr.json()
+            assert body.get("status") == "error", body
+        finally:
+            auth.delete(f"{BASE_URL}/api/brokers/zerodha")
+
+    # --- (F) HTTP smoke: paper reconciliation still NOT_APPLICABLE --
+    def test_reconciliation_paper_not_applicable(self, auth):
+        r = auth.post(f"{BASE_URL}/api/reconciliation/run/paper")
+        assert r.status_code == 200, r.text
+        assert r.json()["state"] == "NOT_APPLICABLE"

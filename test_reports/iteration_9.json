@@ -1,0 +1,36 @@
+{
+  "summary": "Iter 9 P0+P1 completion verified end-to-end. All 118 backend tests pass (106 regression + 12 new). Found 2 real backend bugs introduced by the refactor and fixed them; updated 2 legacy tests whose assertions reflected pre-iter-9 behavior. Reconciler loop confirmed running in lifespan startup (log line 'reconciler loop started (interval=30s)' present).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/iter9_full.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Two coexisting BrokerUnavailable exception classes (brokers/__init__.py legacy + brokers/base.py new ABC). Consider consolidating to brokers/base.py and re-exporting from __init__ so callers cannot accidentally catch only one. Routers/brokers.py now catches both BrokerError and BrokerUnavailable defensively which is a code-smell of the duplication.",
+    "routers/brokers.py.broker_test() now branches on hasattr(result, '__await__') to support both legacy sync adapters (icici, dhan) and new async BrokerAdapter subclasses. Once all legacy adapters migrate, drop the branching.",
+    "services/paper_trading.py has both a free function check_duplicate(...) and a kwarg do_check_duplicate on place_paper_order — naming was renamed correctly but brokers/paper_adapter.py was missed in the rename sweep (now fixed). Add a quick grep-based pre-commit hook for 'check_duplicate=' / 'check_kill_switch=' callsites.",
+    "test_reconciler_tick had to be run in a subprocess because the motor singleton in db.py:get_db() is pinned to FastAPI's lifespan event loop and cannot be reused under pytest's transient asyncio.run loops. Long-term: adopt pytest-asyncio with a session-scoped event_loop fixture and a get_db that accepts an injected client for tests.",
+    "brokers/zerodha.py and brokers/upstox.py raise BrokerAuthError correctly on fake creds — confirmed via direct adapter instantiation and HTTP /test endpoint."
+  ],
+  "updated_files": [
+    "/app/backend/brokers/paper_adapter.py — renamed kwarg check_duplicate → do_check_duplicate to match services.paper_trading.place_paper_order signature",
+    "/app/backend/routers/brokers.py — broker_test() now awaits async test_connection() (hasattr __await__ branch) and catches BrokerError (parent of BrokerAuthError/BrokerOrderRejected/BrokerUnavailable) in addition to legacy BrokerUnavailable, so fake creds return status='error' with 200 instead of 500",
+    "/app/backend/tests/backend_test.py — (1) updated TestBrokers::test_zerodha_connect_then_test_then_delete assertion (SDK now installed, message changed to auth-error keyword); (2) updated TestIter6BrokerAdapterPrep::test_reconciliation_run_zerodha_real_adapter_auth_fails (was test_reconciliation_run_zerodha_legacy_adapter, now expects state=FAILED + FETCH_FAILED instead of PENDING_RECONCILE + ADAPTER_LEGACY); (3) added TestIter9Refactor class with 12 new tests covering: services.paper_trading exports, routers/paper lifespan re-export, dashboard imports compute_positions from services, paper_adapter uses services, zerodha/upstox isinstance(BrokerAdapter) + capabilities(), test_connection raises BrokerAuthError/BrokerUnavailable on fake/missing creds, reconciler_loop module exports, reconciler_tick returns 0 when no live brokers, HTTP zerodha connect+test returns status='error', HTTP paper reconciliation returns NOT_APPLICABLE"
+  ],
+  "success_rate": {"backend": "100% (118/118)", "frontend": "not tested (per request: backend only)"},
+  "test_credentials": "demo@algoforge.io / Demo@123 (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "None. All tests use existing demo user and self-cleanup (TEST_ prefix or delete after).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Iter 9 is GREEN. Reconciler loop is live in lifespan and writes a warning on every 30s tick for any broker_connections in status='live' with invalid creds — keep an eye on /var/log/supervisor/backend.err.log noise if many test brokers are left connected. Two BrokerUnavailable exception classes coexist (brokers/__init__.py legacy + brokers/base.py new) — the router catches both. When the legacy adapters (icici, dhan) are migrated to BrokerAdapter, simplify routers/brokers.py.broker_test (drop hasattr __await__ branch and the legacy except clause). place_paper_order kwargs were renamed do_check_kill_switch / do_check_duplicate — grep callsites if more adapters get added.",
+  "rca of the issue": "Bug 1 (routers/brokers.py 500 on /test for zerodha): zerodha.test_connection() became async in iter 9 but routers/brokers.py.broker_test still invoked it synchronously and only caught BrokerUnavailable. The unawaited coroutine made info.get(...) blow up with AttributeError, surfacing as 500. Fix: await when result is awaitable; broaden except to BrokerError (parent of BrokerAuthError). Bug 2 (paper_adapter.place_order TypeError): the iter 9 rename of place_paper_order's kwargs from check_duplicate → do_check_duplicate missed one callsite in brokers/paper_adapter.py. Fix: rename the kwarg. Both verified by re-running the full suite to 118/118."
+}

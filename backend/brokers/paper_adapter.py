@@ -39,7 +39,7 @@ class PaperAdapter(BrokerAdapter):
 
     async def place_order(self, req: NormalizedOrderRequest) -> NormalizedOrder:
         # Defer to existing paper logic to avoid duplicating the engine.
-        from routers.paper import PaperOrderRequest, place_paper_order
+        from services.paper_trading import PaperOrderRequest, place_paper_order
 
         single = PaperOrderRequest(
             symbol=req.symbol,
@@ -51,7 +51,7 @@ class PaperAdapter(BrokerAdapter):
             option_kind=req.option_kind,
             price=req.price,
         )
-        order = await place_paper_order(single, {"id": self.user_id}, check_duplicate=False)
+        order = await place_paper_order(single, {"id": self.user_id}, do_check_duplicate=False)
         return NormalizedOrder(
             id=order["id"],
             user_id=self.user_id,

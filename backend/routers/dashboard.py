@@ -3,8 +3,7 @@ from fastapi import APIRouter, Depends
 
 from auth import get_current_user
 from db import get_db
-
-from .paper import compute_positions
+from services.paper_trading import compute_positions
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
