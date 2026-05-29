@@ -143,7 +143,7 @@ export default function TrapDetection() {
             {scan.suggestions?.length > 0 && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {scan.suggestions.map((s, i) => (
-                  <div key={i} data-testid={`trap-suggestion-${i}`} className={`panel p-5 border-l-4 ${s.level === "HIGH" ? "border-l-red-500" : "border-l-amber-500"}`}>
+                  <div key={`${s.side}-${s.strike}`} data-testid={`trap-suggestion-${i}`} className={`panel p-5 border-l-4 ${s.level === "HIGH" ? "border-l-red-500" : "border-l-amber-500"}`}>
                     <div className="flex items-center justify-between">
                       <div className={`overline ${s.level === "HIGH" ? "txt-loss" : "txt-warn"}`}>
                         {s.level} · {s.side === "CE" ? "Call writers" : "Put writers"}
@@ -167,7 +167,7 @@ export default function TrapDetection() {
                   <div className="mt-4">
                     <div className="overline mb-1.5">Hedging playbook</div>
                     <ul className="text-sm space-y-1">
-                      {explain.hedging_playbook.map((x, i) => <li key={i} className="flex gap-2"><span className="txt-warn">→</span>{x}</li>)}
+                      {explain.hedging_playbook.map((x) => <li key={`pb-${x.slice(0, 30)}`} className="flex gap-2"><span className="txt-warn">→</span>{x}</li>)}
                     </ul>
                   </div>
                 )}

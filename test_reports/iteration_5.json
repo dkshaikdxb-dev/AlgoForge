@@ -1,0 +1,37 @@
+{
+  "summary": "Iteration 5 code-review fixes verified end-to-end. Full regression PASS: 59/59 tests in 51s (51 prior + 8 new TestIter5CodeReviewFixes). Zero regressions. All 7 spec items confirmed: (1) env-var test creds work with defaults preserved, (2) result/_db/response defensive guards behave correctly, (3) backtest_run now catches AttributeError -> 400 'Invalid strategy DSL: ...' (previously 500), (4) frontend empty catches now log (code-only change; backend regression-tested), (5) bogus indicator type returns 200 with 0 trades (no AttributeError leaks), (6) rmoney connect+test still returns status='error' gracefully after r->response rename, (7) multi-leg basket accepts client-side `_key` per leg (Pydantic extra='ignore') and fills both legs.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "backtest_run AttributeError catch is correct but broad: KeyError/ValueError/TypeError/AttributeError all -> 400 'Invalid strategy DSL'. This is fine for client-supplied DSL but masks any genuine programming bug inside backtest_engine. Consider logging the exception with stack at warning level inside the except block so future engine bugs aren't silently surfaced as 'invalid DSL' to users.",
+    "result: dict | None = None defensive init is good. The `result.get('error')` short-circuit after the try block handles both engine-returned errors and the (impossible) None case — clean.",
+    "Unknown indicator type ('bogus') currently produces total_trades=0 silently. Users will see no error and may think their indicator is just not triggering. Consider returning a warnings[] array in the response listing unrecognized indicator types — non-blocking UX improvement.",
+    "MultiLegBuilder _key strip on the frontend is belt-and-suspenders since Pydantic default extra='ignore' already drops unknown fields. Either approach is fine; current dual safety is acceptable. If extra='forbid' is ever enabled globally, the frontend strip will be mandatory — document this dependency.",
+    "brokers/rmoney.py `response` rename is purely cosmetic; behavior verified unchanged. The graceful status='error' path still returns 200 with the error payload — good.",
+    "backtest_engine ambiguous `l` -> `loss`/`left` is lint-only and verified by full regression. No behavioral change.",
+    "Carry-over: place_paper_order/compute_positions still in routers/paper.py (not blocking, architectural nit from iter 3/4).",
+    "ENV-var test creds pattern (os.environ.get('ALGOFORGE_TEST_EMAIL', 'demo@algoforge.io')) is robust and CI-friendly. Defaults match /app/memory/test_credentials.md."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py (added TestIter5CodeReviewFixes class with 8 tests at EOF)"
+  ],
+  "success_rate": {"backend": "100% (59/59)", "frontend": "not tested per request"},
+  "test_credentials": "demo@algoforge.io / Demo@123 (pre-seeded, works). Overridable via ALGOFORGE_TEST_EMAIL / ALGOFORGE_TEST_PASSWORD env vars (verified by test_env_var_override_logic).",
+  "seed_data_creation": "Same as iteration 4. New iter-5 tests are read-only or self-cleaning (paper/flatten after multi-leg). No persistent test data added.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Full regression suite is now 59 tests. TestIter5CodeReviewFixes verifies iteration-5 cleanup fixes. The multi-leg endpoint path is /api/paper/order/multi-leg (NOT /api/paper/multi_leg). Multi-leg leg schema uses `option_strike` (not `strike`) and Pydantic extra='ignore' silently drops unknown fields like `_key`. AttributeError inside backtest_engine is now mapped to 400 — if you intentionally trigger a real engine bug for diagnostics, you'll see it as 400 'Invalid strategy DSL: ...' not 500. ALGOFORGE_TEST_EMAIL/ALGOFORGE_TEST_PASSWORD env override pattern is verified.",
+  "rca_of_the_issue": "No bugs found. All 7 spec items pass: (a) test_backtest_invalid_dsl_entry_string_returns_400 + test_backtest_invalid_dsl_exit_string_returns_400 -> both 400 with detail starting 'Invalid strategy DSL' (confirms AttributeError + ValueError + TypeError + KeyError all mapped). (b) test_backtest_valid_dsl_still_returns_full_payload -> 200 with sharpe/sortino/equity_curve/trades/max_drawdown_pct/total_return_pct present. (c) test_backtest_unknown_indicator_runs_no_trades -> bogus indicator yields 200 + total_trades=0 (engine swallows unknown gracefully). (d) test_rmoney_graceful_after_var_rename -> POST connect (invalid token) + POST test returns 200 status='error' (no 500 from r->response rename). (e) test_multi_leg_accepts_extra_underscore_key_field -> NIFTY ATM long straddle with `_key` per leg fills both CE+PE, basket_id returned. (f) test_env_var_test_credentials_default + test_env_var_override_logic -> defaults preserved when env unset, overridden correctly when set. (g) All 51 prior tests still pass — zero regression."
+}

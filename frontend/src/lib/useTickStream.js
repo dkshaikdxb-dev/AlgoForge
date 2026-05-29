@@ -9,11 +9,12 @@ export default function useTickStream(symbols = ["NIFTY", "BANKNIFTY"]) {
   const [ticks, setTicks] = useState({});
   const [connected, setConnected] = useState(false);
   const wsRef = useRef(null);
+  const symbolsKey = symbols.join(",");
 
   useEffect(() => {
     const backend = process.env.REACT_APP_BACKEND_URL || "";
     const wsBase = backend.replace(/^http/, "ws");
-    const url = `${wsBase}/api/ws/ticks?symbols=${encodeURIComponent(symbols.join(","))}`;
+    const url = `${wsBase}/api/ws/ticks?symbols=${encodeURIComponent(symbolsKey)}`;
     let stopped = false;
     let retry = null;
 
@@ -26,8 +27,13 @@ export default function useTickStream(symbols = ["NIFTY", "BANKNIFTY"]) {
           setConnected(false);
           if (!stopped) retry = setTimeout(open, 1500);
         };
-        ws.onerror = () => {
-          try { ws.close(); } catch {}
+        ws.onerror = (err) => {
+          console.warn("[useTickStream] websocket error", err);
+          try {
+            ws.close();
+          } catch (closeErr) {
+            console.warn("[useTickStream] close after error failed", closeErr);
+          }
         };
         ws.onmessage = (e) => {
           try {
@@ -39,9 +45,12 @@ export default function useTickStream(symbols = ["NIFTY", "BANKNIFTY"]) {
                 return next;
               });
             }
-          } catch {}
+          } catch (parseErr) {
+            console.warn("[useTickStream] failed to parse tick payload", parseErr);
+          }
         };
-      } catch {
+      } catch (connectErr) {
+        console.warn("[useTickStream] failed to open WebSocket; retrying", connectErr);
         if (!stopped) retry = setTimeout(open, 1500);
       }
     };
@@ -50,10 +59,13 @@ export default function useTickStream(symbols = ["NIFTY", "BANKNIFTY"]) {
     return () => {
       stopped = true;
       if (retry) clearTimeout(retry);
-      try { wsRef.current?.close(); } catch {}
+      try {
+        wsRef.current?.close();
+      } catch (cleanupErr) {
+        console.warn("[useTickStream] cleanup close failed", cleanupErr);
+      }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [symbols.join(",")]);
+  }, [symbolsKey]);
 
   return { ticks, connected };
 }

@@ -137,8 +137,8 @@ export default function Journal() {
                 )}
                 {e.ai_tags?.length > 0 && (
                   <div className="flex gap-2 mt-3 flex-wrap">
-                    {e.ai_tags.map((t, i) => (
-                      <span key={i} className="text-xs border border-[var(--border)] px-2 py-0.5 font-mono-data txt-secondary">{t}</span>
+                    {e.ai_tags.map((t) => (
+                      <span key={`tag-${t}`} className="text-xs border border-[var(--border)] px-2 py-0.5 font-mono-data txt-secondary">{t}</span>
                     ))}
                   </div>
                 )}

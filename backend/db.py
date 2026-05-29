@@ -42,18 +42,20 @@ class BaseDocument(BaseModel):
 
 
 _client: AsyncIOMotorClient | None = None
-_db = None
+_db: Any = None
 
 
 def get_db():
+    """Return the singleton Mongo database handle, initialising on first call."""
     global _client, _db
     if _db is None:
         _client = AsyncIOMotorClient(os.environ["MONGO_URL"])
         _db = _client[os.environ["DB_NAME"]]
+    assert _db is not None  # narrow type for static analyzers
     return _db
 
 
 def close_db():
     global _client
-    if _client:
+    if _client is not None:
         _client.close()

@@ -24,6 +24,7 @@ class BacktestRequest(BaseModel):
 
 @router.post("/backtest/run")
 async def backtest_run(req: BacktestRequest, user: dict = Depends(get_current_user)):
+    result: dict | None = None
     try:
         result = run_backtest(
             req.dsl,
@@ -32,10 +33,10 @@ async def backtest_run(req: BacktestRequest, user: dict = Depends(get_current_us
             fee_bps=req.fee_bps,
             days=req.days,
         )
-    except (KeyError, ValueError, TypeError) as e:
+    except (KeyError, ValueError, TypeError, AttributeError) as e:
         raise HTTPException(400, f"Invalid strategy DSL: {e}")
-    if result.get("error"):
-        raise HTTPException(400, result["error"])
+    if not result or result.get("error"):
+        raise HTTPException(400, (result or {}).get("error", "Backtest produced no result"))
     if req.save:
         db = get_db()
         bid = str(uuid.uuid4())

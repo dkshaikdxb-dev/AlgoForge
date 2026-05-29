@@ -156,7 +156,7 @@ export default function Dashboard() {
                 <div className="txt-muted text-sm">No high-confidence traps. All clear.</div>
               )}
               {trapPreview?.suggestions?.map((s, i) => (
-                <div key={i} className="border border-[var(--border)] p-3" data-testid={`dashboard-trap-${i}`}>
+                <div key={`${s.side}-${s.strike}`} className="border border-[var(--border)] p-3" data-testid={`dashboard-trap-${i}`}>
                   <div className="flex items-center justify-between">
                     <div className={`overline ${s.level === "HIGH" ? "txt-loss" : "txt-warn"}`}>
                       {s.level} · {s.side}

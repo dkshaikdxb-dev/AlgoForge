@@ -98,7 +98,7 @@ export default function StrategyBuilder() {
             <div className="flex flex-wrap gap-2 mt-3">
               {EXAMPLES.map((ex, i) => (
                 <button
-                  key={i}
+                  key={`ex-${ex.slice(0, 20)}`}
                   data-testid={`strategy-example-${i}`}
                   onClick={() => setPrompt(ex)}
                   className="text-xs px-2 py-1 border border-[var(--border)] hover:border-white txt-secondary hover:text-white transition-colors"

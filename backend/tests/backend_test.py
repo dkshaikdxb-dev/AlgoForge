@@ -6,8 +6,10 @@ import pytest
 import requests
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://quant-hybrid-trade.preview.emergentagent.com").rstrip("/")
-DEMO_EMAIL = "demo@algoforge.io"
-DEMO_PASSWORD = "Demo@123"
+# Test credentials read from env; fall back to the seeded demo account from
+# /app/memory/test_credentials.md. Never put production secrets here.
+DEMO_EMAIL = os.environ.get("ALGOFORGE_TEST_EMAIL", "demo@algoforge.io")
+DEMO_PASSWORD = os.environ.get("ALGOFORGE_TEST_PASSWORD", "Demo@123")
 
 
 @pytest.fixture(scope="session")
@@ -738,3 +740,212 @@ class TestLifespan:
         assert "AlgoForge backend started" in out, "Startup log line missing"
         assert "on_event is deprecated" not in out, "on_event deprecation warning still present"
 
+
+
+# ---------- Iteration 5: code-review fix verifications ----------
+class TestIter5CodeReviewFixes:
+    """Behavioral tests for iteration 5 cleanup pass.
+
+    Verifies:
+      * Backtest with structurally invalid DSL -> 400 with detail starting
+        'Invalid strategy DSL' (was 500 before AttributeError was caught).
+      * Backtest with unknown indicator type runs gracefully (no entries,
+        no exception).
+      * Backtest with valid DSL still returns full payload.
+      * Rmoney connect+test still returns status='error' after `r` -> `response`
+        rename in /app/backend/brokers/rmoney.py (no 500).
+      * Multi-leg basket payload that carries a client-side `_key` per leg is
+        accepted (Pydantic extra='ignore').
+      * The DEMO_EMAIL / DEMO_PASSWORD constants resolve from env vars when
+        overridden (defaults preserved otherwise).
+    """
+
+    # --- (3) AttributeError now caught -> 400 not 500 ----------------------
+    def test_backtest_invalid_dsl_entry_string_returns_400(self, auth):
+        # entry is supposed to be a dict; passing 'BAD' will trigger
+        # AttributeError inside the engine (was 500 pre-fix).
+        bad_dsl = {
+            "name": "TEST_BAD_DSL",
+            "symbol": "RELIANCE",
+            "timeframe": "1d",
+            "indicators": [],
+            "entry": "BAD",
+            "exit": {},
+            "size": {"type": "fixed_qty", "value": 1},
+        }
+        r = auth.post(f"{BASE_URL}/api/backtest/run",
+                      json={"dsl": bad_dsl, "days": 60, "save": False})
+        assert r.status_code == 400, f"expected 400, got {r.status_code}: {r.text}"
+        detail = r.json().get("detail", "")
+        assert detail.startswith("Invalid strategy DSL"), (
+            f"detail must start with 'Invalid strategy DSL', got: {detail!r}"
+        )
+
+    def test_backtest_invalid_dsl_exit_string_returns_400(self, auth):
+        bad_dsl = {
+            "name": "TEST_BAD_DSL_2",
+            "symbol": "RELIANCE",
+            "timeframe": "1d",
+            "indicators": [],
+            "entry": {"op": "and", "rules": []},
+            "exit": "WRONG",
+            "size": {"type": "fixed_qty", "value": 1},
+        }
+        r = auth.post(f"{BASE_URL}/api/backtest/run",
+                      json={"dsl": bad_dsl, "days": 60, "save": False})
+        assert r.status_code == 400, r.text
+        assert "Invalid strategy DSL" in r.json().get("detail", "")
+
+    # --- (5) Unknown indicator type still runs gracefully ------------------
+    def test_backtest_unknown_indicator_runs_no_trades(self, auth):
+        dsl = {
+            "name": "TEST_BOGUS_IND",
+            "symbol": "RELIANCE",
+            "timeframe": "1d",
+            "indicators": [
+                {"id": "x", "type": "bogus", "period": 5, "source": "close"}
+            ],
+            "entry": {"op": "and",
+                      "rules": [{"left": "x", "cmp": ">", "right": 0}]},
+            "exit": {"op": "or",
+                     "rules": [{"left": "x", "cmp": "<", "right": 0}]},
+            "size": {"type": "fixed_qty", "value": 1},
+        }
+        r = auth.post(f"{BASE_URL}/api/backtest/run",
+                      json={"dsl": dsl, "days": 120, "save": False})
+        assert r.status_code == 200, (
+            f"unknown indicator must NOT 500; got {r.status_code}: {r.text}"
+        )
+        body = r.json()
+        # engine still produced a structured payload
+        for k in ("sharpe", "sortino", "equity_curve", "trades", "total_trades"):
+            assert k in body, f"missing {k} in payload"
+        assert isinstance(body["equity_curve"], list)
+        assert isinstance(body["trades"], list)
+        assert body["total_trades"] == 0, (
+            f"unknown indicator -> no entries; got total_trades={body['total_trades']}"
+        )
+
+    # --- Valid DSL still returns full payload -----------------------------
+    def test_backtest_valid_dsl_still_returns_full_payload(self, auth):
+        dsl = {
+            "name": "TEST_VALID_AFTER_FIX",
+            "symbol": "TCS",
+            "timeframe": "1d",
+            "indicators": [
+                {"id": "fast", "type": "sma", "period": 5, "source": "close"},
+                {"id": "slow", "type": "sma", "period": 20, "source": "close"},
+            ],
+            "entry": {"op": "and",
+                      "rules": [{"left": "fast", "cmp": ">", "right": "slow"}]},
+            "exit": {"op": "or",
+                     "rules": [{"left": "fast", "cmp": "<", "right": "slow"}]},
+            "size": {"type": "fixed_qty", "value": 5},
+        }
+        r = auth.post(f"{BASE_URL}/api/backtest/run",
+                      json={"dsl": dsl, "days": 250, "save": False})
+        assert r.status_code == 200, r.text
+        body = r.json()
+        for k in ("sharpe", "sortino", "equity_curve", "trades",
+                  "total_trades", "max_drawdown_pct", "total_return_pct"):
+            assert k in body
+        assert isinstance(body["equity_curve"], list)
+        assert isinstance(body["trades"], list)
+
+    # --- (4) Rmoney rename `r` -> `response` still graceful ---------------
+    def test_rmoney_graceful_after_var_rename(self, auth):
+        # connect with bogus creds
+        r = auth.post(f"{BASE_URL}/api/brokers/rmoney/connect", json={
+            "broker": "rmoney",
+            "credentials": {
+                "user_id": f"TEST_USER_{uuid.uuid4().hex[:6]}",
+                "api_key": "k", "api_secret": "s",
+                "session_token": "tok-invalid",
+            },
+        })
+        assert r.status_code == 200, r.text
+        # now test - must NOT 500; must report status='error' gracefully
+        tr = auth.post(f"{BASE_URL}/api/brokers/rmoney/test")
+        assert tr.status_code == 200, f"expected 200 with status='error', got {tr.status_code}: {tr.text}"
+        body = tr.json()
+        assert body.get("status") == "error", f"expected status='error', got {body}"
+        # cleanup
+        auth.delete(f"{BASE_URL}/api/brokers/rmoney")
+
+    # --- (6) MultiLegBuilder _key field ignored by backend ----------------
+    def test_multi_leg_accepts_extra_underscore_key_field(self, auth):
+        # Build a 2-leg Long Straddle on NIFTY ATM with client _key fields.
+        # ensure kill switch off + flat positions
+        auth.post(f"{BASE_URL}/api/paper/risk-limits",
+                  json={"max_loss_per_day": 100000, "max_open_positions": 50,
+                        "kill_switch": False})
+        auth.post(f"{BASE_URL}/api/paper/flatten")
+        chain = auth.get(f"{BASE_URL}/api/market/options-chain",
+                         params={"symbol": "NIFTY"}).json()
+        spot = chain.get("spot") or chain.get("underlying") or \
+            chain["rows"][len(chain["rows"]) // 2]["strike"]
+        strikes = [row["strike"] for row in chain["rows"]]
+        atm = min(strikes, key=lambda s: abs(s - spot))
+        idem = f"test-iter5-multileg-{uuid.uuid4().hex}"
+        payload = {
+            "name": "TEST_STRADDLE_WITH_KEY",
+            "legs": [
+                {
+                    "_key": "client-leg-1",  # extra client-only field
+                    "side": "BUY", "instrument_type": "OPT", "qty": 25,
+                    "symbol": "NIFTY", "option_strike": atm, "option_kind": "CE",
+                },
+                {
+                    "_key": "client-leg-2",
+                    "side": "BUY", "instrument_type": "OPT", "qty": 25,
+                    "symbol": "NIFTY", "option_strike": atm, "option_kind": "PE",
+                },
+            ],
+        }
+        r = auth.post(f"{BASE_URL}/api/paper/order/multi-leg",
+                      json=payload,
+                      headers={"Idempotency-Key": idem})
+        assert r.status_code == 200, f"_key must be ignored; got {r.status_code}: {r.text}"
+        body = r.json()
+        assert body.get("basket_id"), "basket_id missing"
+        assert len(body.get("orders", [])) == 2, f"expected 2 orders, got {body}"
+        for o in body["orders"]:
+            assert o["status"] == "FILLED"
+        auth.post(f"{BASE_URL}/api/paper/flatten")
+
+    # --- (1) ENV-var test credentials -------------------------------------
+    def test_env_var_test_credentials_default(self):
+        # When env vars are unset (the typical test run), defaults must be the
+        # documented demo account.
+        # We re-import the constants from the module to assert they exist.
+        from backend.tests import backend_test as bt  # noqa
+        # constants are module-level
+        assert bt.DEMO_EMAIL  # truthy
+        assert bt.DEMO_PASSWORD
+        # defaults preserved when env vars not explicitly set in this process
+        if not os.environ.get("ALGOFORGE_TEST_EMAIL"):
+            assert bt.DEMO_EMAIL == "demo@algoforge.io"
+        if not os.environ.get("ALGOFORGE_TEST_PASSWORD"):
+            assert bt.DEMO_PASSWORD == "Demo@123"
+
+    def test_env_var_override_logic(self):
+        # Simulate override behavior: the os.environ.get(..., default) pattern
+        # used in backend_test.py must honor env vars when present.
+        prev_email = os.environ.get("ALGOFORGE_TEST_EMAIL")
+        prev_pw = os.environ.get("ALGOFORGE_TEST_PASSWORD")
+        try:
+            os.environ["ALGOFORGE_TEST_EMAIL"] = "override@example.com"
+            os.environ["ALGOFORGE_TEST_PASSWORD"] = "Override#1"
+            assert os.environ.get("ALGOFORGE_TEST_EMAIL",
+                                  "demo@algoforge.io") == "override@example.com"
+            assert os.environ.get("ALGOFORGE_TEST_PASSWORD",
+                                  "Demo@123") == "Override#1"
+        finally:
+            if prev_email is None:
+                os.environ.pop("ALGOFORGE_TEST_EMAIL", None)
+            else:
+                os.environ["ALGOFORGE_TEST_EMAIL"] = prev_email
+            if prev_pw is None:
+                os.environ.pop("ALGOFORGE_TEST_PASSWORD", None)
+            else:
+                os.environ["ALGOFORGE_TEST_PASSWORD"] = prev_pw

@@ -53,7 +53,8 @@ export default function MultiLegBuilder({ symbols, onPlaced, disabled }) {
 
   const applyPreset = (preset) => {
     if (!chain) return;
-    const built = preset.legs(chain.atm, chain.step).map((l) => ({
+    const built = preset.legs(chain.atm, chain.step).map((l, idx) => ({
+      _key: `${preset.id}-${idx}-${Date.now()}`,
       side: l.side,
       instrument_type: "OPT",
       symbol,
@@ -70,6 +71,7 @@ export default function MultiLegBuilder({ symbols, onPlaced, disabled }) {
     setLegs((prev) => [
       ...prev,
       {
+        _key: `custom-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         side: "BUY",
         instrument_type: "OPT",
         symbol,
@@ -95,7 +97,9 @@ export default function MultiLegBuilder({ symbols, onPlaced, disabled }) {
     }
     setBusy(true);
     try {
-      const { data } = await api.post("/paper/order/multi-leg", { name, legs });
+      // Strip client-only _key field before sending to backend
+      const payloadLegs = legs.map(({ _key, ...rest }) => rest);
+      const { data } = await api.post("/paper/order/multi-leg", { name, legs: payloadLegs });
       if (data.idempotent_replay) {
         toast.info(`${name}: replay (already filled within 24h)`);
       } else {
@@ -177,7 +181,7 @@ export default function MultiLegBuilder({ symbols, onPlaced, disabled }) {
           </div>
         )}
         {legs.map((leg, i) => (
-          <div key={i} data-testid={`ml-leg-${i}`} className="grid grid-cols-6 gap-2 items-end border border-[var(--border)] p-3">
+          <div key={leg._key} data-testid={`ml-leg-${i}`} className="grid grid-cols-6 gap-2 items-end border border-[var(--border)] p-3">
             <div className="col-span-1">
               <Label className="overline">Side</Label>
               <Select value={leg.side} onValueChange={(v) => updateLeg(i, { side: v })}>

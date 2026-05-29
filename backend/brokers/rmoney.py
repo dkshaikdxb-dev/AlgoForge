@@ -24,12 +24,12 @@ class RmoneyClient:
     def test_connection(self) -> dict:
         # REST endpoint placeholder. Real spec from Rmoney support is required.
         try:
-            r = requests.get(f"{BASE_URL}/profile", headers=self._headers(), timeout=8)
+            response = requests.get(f"{BASE_URL}/profile", headers=self._headers(), timeout=8)
         except requests.RequestException as e:
             raise BrokerUnavailable(f"Rmoney network error: {e}") from e
-        if r.status_code >= 400:
-            raise BrokerUnavailable(f"Rmoney auth failed ({r.status_code})")
-        return {"ok": True, "data": r.json()}
+        if response.status_code >= 400:
+            raise BrokerUnavailable(f"Rmoney auth failed ({response.status_code})")
+        return {"ok": True, "data": response.json()}
 
     def is_connected(self) -> bool:
         try:

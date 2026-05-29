@@ -70,10 +70,10 @@ def _rsi(values: list[float], period: int = 14) -> list[float | None]:
     out[period] = 100 - 100 / (1 + rs)
     for i in range(period + 1, len(values)):
         d = values[i] - values[i - 1]
-        g = max(d, 0)
-        l = max(-d, 0)
-        avg_g = (avg_g * (period - 1) + g) / period
-        avg_l = (avg_l * (period - 1) + l) / period
+        gain = max(d, 0)
+        loss = max(-d, 0)
+        avg_g = (avg_g * (period - 1) + gain) / period
+        avg_l = (avg_l * (period - 1) + loss) / period
         rs = avg_g / avg_l if avg_l else 100
         out[i] = 100 - 100 / (1 + rs)
     return out
@@ -113,21 +113,21 @@ def _eval_rule(rule: dict, series: dict, i: int) -> bool:
         op = rule["op"].lower()
         results = [_eval_rule(r, series, i) for r in rule.get("rules", [])]
         return all(results) if op == "and" else any(results)
-    l = _val(rule.get("left"), series, i)
-    r = _val(rule.get("right"), series, i)
-    if l is None or r is None:
+    left = _val(rule.get("left"), series, i)
+    right = _val(rule.get("right"), series, i)
+    if left is None or right is None:
         return False
     cmp = rule.get("cmp", ">")
     if cmp == ">":
-        return l > r
+        return left > right
     if cmp == "<":
-        return l < r
+        return left < right
     if cmp == ">=":
-        return l >= r
+        return left >= right
     if cmp == "<=":
-        return l <= r
+        return left <= right
     if cmp in ("==", "="):
-        return abs(l - r) < 1e-9
+        return abs(left - right) < 1e-9
     return False
 
 

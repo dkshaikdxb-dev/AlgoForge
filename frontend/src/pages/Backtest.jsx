@@ -40,7 +40,9 @@ export default function Backtest() {
         try {
           const parsed = JSON.parse(stored);
           if (parsed.id) setSelectedId(parsed.id);
-        } catch {}
+        } catch (parseErr) {
+          console.warn("[Backtest] could not parse stored DSL", parseErr);
+        }
         sessionStorage.removeItem("af_backtest_dsl");
       } else if (data.items.length > 0) {
         setSelectedId(data.items[0].id);
@@ -224,7 +226,7 @@ export default function Backtest() {
                     </TableHeader>
                     <TableBody>
                       {result.trades.map((t, i) => (
-                        <TableRow key={i} className="border-[var(--border)]">
+                        <TableRow key={`${t.date}-${t.side}-${i}`} className="border-[var(--border)]">
                           <TableCell className="font-mono-data text-xs">{t.date}</TableCell>
                           <TableCell className={`font-section text-xs ${t.side === "BUY" ? "txt-profit" : "txt-loss"}`}>{t.side}</TableCell>
                           <TableCell className="font-mono-data text-right">{t.qty}</TableCell>
@@ -263,7 +265,7 @@ export default function Backtest() {
                       <div>
                         <div className="overline mb-1.5">Strengths</div>
                         <ul className="text-sm space-y-1">
-                          {risk.strengths.map((x, i) => <li key={i} className="flex gap-2"><span className="txt-profit">+</span>{x}</li>)}
+                          {risk.strengths.map((x) => <li key={`s-${x}`} className="flex gap-2"><span className="txt-profit">+</span>{x}</li>)}
                         </ul>
                       </div>
                     )}
@@ -271,7 +273,7 @@ export default function Backtest() {
                       <div>
                         <div className="overline mb-1.5">Concerns</div>
                         <ul className="text-sm space-y-1">
-                          {risk.concerns.map((x, i) => <li key={i} className="flex gap-2"><span className="txt-loss">−</span>{x}</li>)}
+                          {risk.concerns.map((x) => <li key={`c-${x}`} className="flex gap-2"><span className="txt-loss">−</span>{x}</li>)}
                         </ul>
                       </div>
                     )}
@@ -279,7 +281,7 @@ export default function Backtest() {
                       <div>
                         <div className="overline mb-1.5">Suggestions</div>
                         <ul className="text-sm space-y-1">
-                          {risk.suggestions.map((x, i) => <li key={i} className="flex gap-2"><span className="txt-warn">→</span>{x}</li>)}
+                          {risk.suggestions.map((x) => <li key={`g-${x}`} className="flex gap-2"><span className="txt-warn">→</span>{x}</li>)}
                         </ul>
                       </div>
                     )}
