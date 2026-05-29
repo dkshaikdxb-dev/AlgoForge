@@ -100,20 +100,10 @@ export default function Settings() {
             <div className="overline">Broker connections</div>
           </div>
           <p className="txt-secondary text-sm mb-4">
-            Real-money execution requires broker API credentials (KYC + 2FA). The platform supports
-            <span className="font-section text-white"> Zerodha</span>, <span className="font-section text-white">Upstox</span>, Angel One, ICICI Direct, Dhan, Rmoney and Kotak Neo.
+            Real-money execution requires broker API credentials (KYC + 2FA). Manage your encrypted vault from the
+            <a href="/brokers" className="text-white underline underline-offset-4 ml-1">Brokers</a> page. Supported:
+            <span className="font-section text-white"> Zerodha</span>, <span className="font-section text-white">Upstox</span>, Dhan, ICICI Direct and Rmoney.
           </p>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            {["Zerodha", "Upstox", "Angel One", "ICICI Direct", "Dhan", "Rmoney", "Kotak Neo", "Paper"].map((b) => (
-              <div key={b} data-testid={`broker-${b.replace(/\s/g,'-').toLowerCase()}`} className="border border-[var(--border)] p-4 flex items-center justify-between">
-                <div>
-                  <div className="font-section text-sm">{b}</div>
-                  <div className="overline mt-1">{b === "Paper" ? "ACTIVE" : "Pending keys"}</div>
-                </div>
-                <div className={`w-2 h-2 ${b === "Paper" ? "bg-emerald-500" : "bg-zinc-600"}`} />
-              </div>
-            ))}
-          </div>
         </div>
       </div>
     </AppShell>

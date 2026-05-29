@@ -24,9 +24,12 @@ from ai_service import (
 )
 from auth import get_current_user, router as auth_router
 from backtest_engine import run_backtest
+from brokers import BrokerUnavailable, encrypt_credentials, decrypt_credentials
+from brokers.registry import list_brokers, make_client
 from db import close_db, get_db, now_iso
 from market_data import get_ohlcv, get_options_chain, get_symbols
 from trap_detection import scan_traps
+from ws_feed import router as ws_router
 
 app = FastAPI(title="AlgoForge — AI Trading Platform")
 api = APIRouter(prefix="/api")
@@ -420,8 +423,128 @@ async def journal_list(user: dict = Depends(get_current_user)):
     return {"items": docs}
 
 
-# ---------- Dashboard summary ----------
+# ---------- Brokers ----------
 
+class BrokerConnectRequest(BaseModel):
+    credentials: dict
+
+
+@api.get("/brokers")
+async def brokers_list(user: dict = Depends(get_current_user)):
+    db = get_db()
+    connected = await db.broker_connections.find({"user_id": user["id"]}, {"_id": 0, "credentials_enc": 0}).to_list(20)
+    by_name = {c["broker"]: c for c in connected}
+    items = []
+    for b in list_brokers():
+        c = by_name.get(b["name"])
+        items.append({
+            **b,
+            "connected": bool(c),
+            "last_test": c.get("last_test") if c else None,
+            "status": c.get("status") if c else "disconnected",
+        })
+    return {"items": items}
+
+
+@api.post("/brokers/{name}/connect")
+async def broker_connect(name: str, req: BrokerConnectRequest, user: dict = Depends(get_current_user)):
+    if name not in {b["name"] for b in list_brokers()}:
+        raise HTTPException(404, f"Unknown broker {name}")
+    db = get_db()
+    enc = encrypt_credentials(req.credentials)
+    doc = {
+        "user_id": user["id"],
+        "broker": name,
+        "credentials_enc": enc,
+        "status": "saved",
+        "updated_at": now_iso(),
+    }
+    await db.broker_connections.update_one(
+        {"user_id": user["id"], "broker": name},
+        {"$set": doc, "$setOnInsert": {"created_at": now_iso()}},
+        upsert=True,
+    )
+    return {"ok": True, "broker": name, "status": "saved"}
+
+
+@api.post("/brokers/{name}/test")
+async def broker_test(name: str, user: dict = Depends(get_current_user)):
+    db = get_db()
+    rec = await db.broker_connections.find_one({"user_id": user["id"], "broker": name})
+    if not rec:
+        raise HTTPException(404, "Broker not connected")
+    creds = decrypt_credentials(rec["credentials_enc"])
+    try:
+        client = make_client(name, creds)
+        info = client.test_connection()
+        status = "live"
+        message = info.get("name") or info.get("user_id") or "OK"
+    except BrokerUnavailable as e:
+        status = "error"
+        message = str(e)
+        info = {"ok": False, "error": message}
+    await db.broker_connections.update_one(
+        {"user_id": user["id"], "broker": name},
+        {"$set": {"status": status, "last_test": now_iso(), "last_message": message}},
+    )
+    return {"broker": name, "status": status, "message": message, "info": info}
+
+
+@api.delete("/brokers/{name}")
+async def broker_disconnect(name: str, user: dict = Depends(get_current_user)):
+    db = get_db()
+    res = await db.broker_connections.delete_one({"user_id": user["id"], "broker": name})
+    return {"deleted": res.deleted_count}
+
+
+# ---------- Multi-leg paper orders ----------
+
+class MultiLegLeg(BaseModel):
+    side: str  # BUY / SELL
+    instrument_type: str = "OPT"  # OPT or EQ
+    qty: int = Field(gt=0)
+    symbol: str
+    option_strike: Optional[int] = None
+    option_kind: Optional[str] = None  # CE / PE
+
+
+class MultiLegOrderRequest(BaseModel):
+    name: str = "Basket"
+    legs: list[MultiLegLeg]
+
+
+@api.post("/paper/order/multi-leg")
+async def paper_multi_leg(req: MultiLegOrderRequest, user: dict = Depends(get_current_user)):
+    db = get_db()
+    risk = await db.risk_limits.find_one({"user_id": user["id"]}) or {}
+    if risk.get("kill_switch"):
+        raise HTTPException(423, "Kill switch is active.")
+    if not req.legs:
+        raise HTTPException(400, "At least one leg required")
+    placed = []
+    for leg in req.legs:
+        payload = PaperOrderRequest(
+            symbol=leg.symbol,
+            side=leg.side,
+            qty=leg.qty,
+            order_type="MARKET",
+            instrument_type=leg.instrument_type,
+            option_strike=leg.option_strike,
+            option_kind=leg.option_kind,
+        )
+        order = await paper_order(payload, user)
+        placed.append(order)
+    bid = str(uuid.uuid4())
+    await db.baskets.insert_one({
+        "_id": bid, "user_id": user["id"], "name": req.name,
+        "legs": [leg.model_dump() for leg in req.legs],
+        "order_ids": [o["id"] for o in placed],
+        "created_at": now_iso(),
+    })
+    return {"basket_id": bid, "orders": placed}
+
+
+# ---------- Dashboard summary ----------
 @api.get("/dashboard/summary")
 async def dashboard_summary(user: dict = Depends(get_current_user)):
     db = get_db()
@@ -447,6 +570,11 @@ async def dashboard_summary(user: dict = Depends(get_current_user)):
 
 api.include_router(auth_router)
 app.include_router(api)
+app.include_router(ws_router)  # WebSocket /ws/ticks (no /api prefix — ingress passes via /ws/* too via prefix; we expose under /api/ws as well)
+# Also expose ws_router behind /api so frontend can use REACT_APP_BACKEND_URL/api/ws/ticks
+api_ws = APIRouter(prefix="/api")
+api_ws.include_router(ws_router)
+app.include_router(api_ws)
 
 app.add_middleware(
     CORSMiddleware,

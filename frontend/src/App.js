@@ -12,6 +12,7 @@ import Backtest from "@/pages/Backtest";
 import PaperExecution from "@/pages/PaperExecution";
 import TrapDetection from "@/pages/TrapDetection";
 import Journal from "@/pages/Journal";
+import Brokers from "@/pages/Brokers";
 import Settings from "@/pages/Settings";
 
 function ProtectedRoute({ children }) {
@@ -52,6 +53,7 @@ function App() {
           <Route path="/paper" element={<ProtectedRoute><PaperExecution /></ProtectedRoute>} />
           <Route path="/trap" element={<ProtectedRoute><TrapDetection /></ProtectedRoute>} />
           <Route path="/journal" element={<ProtectedRoute><Journal /></ProtectedRoute>} />
+          <Route path="/brokers" element={<ProtectedRoute><Brokers /></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

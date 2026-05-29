@@ -9,9 +9,11 @@ import {
   Settings,
   LogOut,
   Zap,
+  Plug,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
+import TickerBar from "@/components/TickerBar";
 
 const NAV = [
   { to: "/", label: "Cockpit", icon: LayoutDashboard, end: true, testid: "nav-cockpit" },
@@ -20,6 +22,7 @@ const NAV = [
   { to: "/paper", label: "Paper Execution", icon: Activity, testid: "nav-paper" },
   { to: "/trap", label: "Trap Detection", icon: AlertTriangle, testid: "nav-trap" },
   { to: "/journal", label: "Journal", icon: BookOpen, testid: "nav-journal" },
+  { to: "/brokers", label: "Brokers", icon: Plug, testid: "nav-brokers" },
   { to: "/settings", label: "Settings", icon: Settings, testid: "nav-settings" },
 ];
 
@@ -84,7 +87,10 @@ export default function AppShell({ children }) {
       </aside>
 
       {/* Main */}
-      <main className="flex-1 min-w-0 overflow-x-hidden">{children}</main>
+      <main className="flex-1 min-w-0 overflow-x-hidden flex flex-col">
+        <TickerBar />
+        <div className="flex-1">{children}</div>
+      </main>
     </div>
   );
 }

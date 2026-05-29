@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/table";
 import { ShieldAlert, X, ArrowDownUp } from "lucide-react";
 import { toast } from "sonner";
+import MultiLegBuilder from "@/components/MultiLegBuilder";
 
 const fmt = (n, d = 2) =>
   (n === null || n === undefined || isNaN(n)) ? "—" : Number(n).toLocaleString("en-IN", { minimumFractionDigits: d, maximumFractionDigits: d });
@@ -194,6 +195,9 @@ export default function PaperExecution() {
             <div className="mt-3 text-xs txt-loss">Kill switch active — new orders blocked.</div>
           )}
         </div>
+
+        {/* Multi-leg builder */}
+        <MultiLegBuilder symbols={symbols} disabled={risk.kill_switch} onPlaced={load} />
 
         {/* Positions */}
         <div className="panel p-5">
