@@ -133,13 +133,16 @@ class BacktestRequest(BaseModel):
 
 @api.post("/backtest/run")
 async def backtest_run(req: BacktestRequest, user: dict = Depends(get_current_user)):
-    result = run_backtest(
-        req.dsl,
-        capital=req.capital,
-        slippage_bps=req.slippage_bps,
-        fee_bps=req.fee_bps,
-        days=req.days,
-    )
+    try:
+        result = run_backtest(
+            req.dsl,
+            capital=req.capital,
+            slippage_bps=req.slippage_bps,
+            fee_bps=req.fee_bps,
+            days=req.days,
+        )
+    except (KeyError, ValueError, TypeError) as e:
+        raise HTTPException(400, f"Invalid strategy DSL: {e}")
     if result.get("error"):
         raise HTTPException(400, result["error"])
     if req.save:

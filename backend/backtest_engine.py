@@ -81,15 +81,16 @@ def _rsi(values: list[float], period: int = 14) -> list[float | None]:
 
 def _compute_indicators(dsl: dict, closes: list[float]) -> dict[str, list]:
     result: dict[str, list] = {"close": closes}
-    for ind in dsl.get("indicators", []):
-        t = ind.get("type", "").lower()
+    for idx, ind in enumerate(dsl.get("indicators", [])):
+        t = (ind.get("type") or "").lower()
         period = int(ind.get("period", 14))
+        ind_id = ind.get("id") or ind.get("name") or f"{t}_{period}_{idx}"
         if t == "sma":
-            result[ind["id"]] = _sma(closes, period)
+            result[ind_id] = _sma(closes, period)
         elif t == "ema":
-            result[ind["id"]] = _ema(closes, period)
+            result[ind_id] = _ema(closes, period)
         elif t == "rsi":
-            result[ind["id"]] = _rsi(closes, period)
+            result[ind_id] = _rsi(closes, period)
     return result
 
 
