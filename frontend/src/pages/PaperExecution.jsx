@@ -66,11 +66,43 @@ export default function PaperExecution() {
         payload.option_strike = Number(optStrike);
         payload.option_kind = optKind;
       }
-      await api.post("/paper/order", payload);
-      toast.success(`${side} ${qty} ${symbol} filled (paper)`);
+      const { data } = await api.post("/paper/order", payload);
+      if (data.idempotent_replay) {
+        toast.info(`${side} ${qty} ${symbol} — replay (already filled within 24h)`);
+      } else {
+        toast.success(`${side} ${qty} ${symbol} filled (paper)`);
+      }
       load();
     } catch (e) {
-      toast.error(e?.response?.data?.detail || "Order rejected");
+      const status = e?.response?.status;
+      const detail = e?.response?.data?.detail || "Order rejected";
+      if (status === 409) {
+        toast.warning(detail, {
+          action: {
+            label: "Force",
+            onClick: async () => {
+              try {
+                await api.post("/paper/order?force=true", {
+                  symbol,
+                  side,
+                  qty: Number(qty),
+                  order_type: "MARKET",
+                  instrument_type: instrumentType,
+                  ...(instrumentType === "OPT"
+                    ? { option_strike: Number(optStrike), option_kind: optKind }
+                    : {}),
+                });
+                toast.success("Forced order placed");
+                load();
+              } catch {
+                toast.error("Force order failed");
+              }
+            },
+          },
+        });
+      } else {
+        toast.error(detail);
+      }
     }
   };
 

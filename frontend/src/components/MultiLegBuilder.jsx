@@ -96,11 +96,21 @@ export default function MultiLegBuilder({ symbols, onPlaced, disabled }) {
     setBusy(true);
     try {
       const { data } = await api.post("/paper/order/multi-leg", { name, legs });
-      toast.success(`${name}: ${data.orders.length} legs filled`);
+      if (data.idempotent_replay) {
+        toast.info(`${name}: replay (already filled within 24h)`);
+      } else {
+        toast.success(`${name}: ${data.orders.length} legs filled`);
+      }
       setLegs([]);
       onPlaced?.();
     } catch (e) {
-      toast.error(e?.response?.data?.detail || "Multi-leg order rejected");
+      const status = e?.response?.status;
+      const detail = e?.response?.data?.detail || "Multi-leg order rejected";
+      if (status === 400 && /Leg \d+/.test(detail)) {
+        toast.error(`Pre-flight failed — ${detail}`);
+      } else {
+        toast.error(detail);
+      }
     } finally {
       setBusy(false);
     }

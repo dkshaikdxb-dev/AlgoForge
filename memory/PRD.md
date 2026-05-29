@@ -65,3 +65,18 @@ Build a modular & scalable AI-first hybrid algorithmic trading platform with: da
 - `server.py` is now ~80 lines: imports, router mounting, CORS, lifecycle.
 - Shared async helpers `place_paper_order()` and `compute_positions()` live in `routers/paper.py` and are reused by multi-leg + dashboard (direct calls, no nested HTTP).
 - 34/34 backend regression PASS — zero behavior change.
+
+## Iteration 4 (2026-02-29) — P0 item-2 + lifespan
+- **Literal validation**: `PaperOrderRequest.side: Literal["BUY","SELL"]`, instrument_type, option_kind, order_type — invalid inputs return 422 with clear FastAPI message.
+- **Idempotency keys** (`Idempotency-Key` header or auto-derived SHA-256 of payload+user). Cached in `idempotency_keys` collection with 24h TTL index. Frontend `api.js` interceptor auto-generates a per-click UUID for paper-order POSTs so legitimate retries aren't silently no-op'd.
+- **Duplicate-order prevention**: 5s sliding window matches user × instrument × side × qty against `paper_orders.created_at`; returns 409 with `?force=true` override path. Frontend exposes a "Force" toast action.
+- **Multi-leg pre-flight + rollback**: every leg validated before any insert (catches bad strikes / option_kind); mid-loop DB failures trigger snapshot-based rollback of orders + positions. Orders are tagged `basket_pending=true` during placement and flipped to `basket_pending=false, basket_id=<id>` on commit.
+- **Lifespan migration**: replaced `@app.on_event` with `asynccontextmanager`. TTL index ensured on startup.
+- **Testing**: 51/51 backend pass; frontend lint clean; manual flow verified.
+
+## Remaining P0/P1
+- **P0**: Live broker wiring (Kite + Upstox) — awaiting API keys.
+- **P0**: Broker-agnostic adapter interface refinement + order-state reconciliation (poll + WS) — will land alongside live wiring.
+- **P1**: Audit-log viewer (SEBI-style trace).
+- **P1**: Monte Carlo stress tester.
+- **P1**: Move paper-trading logic into `services/`.
