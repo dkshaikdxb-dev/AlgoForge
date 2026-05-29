@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter,
 } from "@/components/ui/dialog";
-import { Plug, Loader2, ShieldCheck, ExternalLink, Trash2, KeyRound } from "lucide-react";
+import { Plug, Loader2, ShieldCheck, ExternalLink, Trash2, KeyRound, RefreshCw, Check } from "lucide-react";
 import { toast } from "sonner";
 
 export default function Brokers() {

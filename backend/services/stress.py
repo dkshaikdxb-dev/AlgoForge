@@ -115,7 +115,7 @@ def run_monte_carlo(
     if not base_returns:
         return {"error": "Could not derive returns from equity curve."}
 
-    rng = random.Random(seed or random.randrange(2**32))
+    rng = random.Random(seed if seed is not None else random.randrange(2**32))
     iterations = max(50, min(5000, int(iterations)))
 
     samples = {"final_equity": [], "max_drawdown_pct": [], "sharpe": [], "sortino": [], "total_return_pct": []}

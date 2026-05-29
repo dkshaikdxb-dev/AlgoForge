@@ -120,3 +120,11 @@ Build a modular & scalable AI-first hybrid algorithmic trading platform with: da
   - Export filename includes ISO date.
 - **Frontend**: new `/audit` page with overline-styled filter chips, search/date inputs, SEBI 6-step toggle, paginated event timeline, CSV download. Sidebar nav entry under Journal.
 - **Tests**: 93/93 backend pass (22 new TestIter7AuditLog + 71 regression). Lint clean both stacks.
+
+## Iteration 8 (2026-02-29) — Monte Carlo Stress Tester (P1) + Broker UI Hotfix
+- **`services/stress.py`**: block-bootstrap resampling of equity-curve returns + per-bar slippage jitter; iterations 50–5000 clamped; produces P5/P25/P50/P75/P95/mean/std/min/max for final_equity / max_drawdown_pct / sharpe / sortino / total_return_pct; 20-bin histograms for DD, Sharpe, Return; worst-path equity curve; blow-up rate (DD ≤ −25%).
+- **Endpoint** `POST /api/stress/run` — accepts either a pre-computed backtest or {dsl, capital, slippage_bps, fee_bps, days, iterations, block_size, slippage_jitter_bps, seed}. Records a `BACKTEST_RUN` audit event with `Monte Carlo × N` summary + payload (blowup_rate_pct, p5_drawdown, p95_return).
+- **Frontend** — amber `MONTE CARLO × 1000` button on the Backtest page next to AI Risk Review; renders 5 percentile cards, 2 histogram bars (DD + Return), and a red worst-path line with capital reference line.
+- **Code-review fix applied**: `seed=0` now respected (previously fell through to random due to truthiness).
+- **Hotfix**: Brokers page crashed with `ReferenceError: Check is not defined` after a prior import edit silently no-op'd. Re-applied the import; page now renders capability chips correctly. Root cause was a stale `search_replace` no-op match — file content drifted between the edit and verification.
+- **Tests**: 106/106 backend pass (13 new TestIter8MonteCarloStress + 93 regression).
