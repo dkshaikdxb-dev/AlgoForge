@@ -52,6 +52,11 @@ SUPPORTED: dict[str, dict] = {
     },
     "dhan": {
         "client": DhanClient,
+        "capabilities": {
+            "supports_modify": True, "supports_amo": True, "supports_iceberg": False,
+            "supports_basket_native": False, "supports_postback_ws": True,
+            "supports_options": True, "supports_options_multi_leg": True,
+        },
         "info": BrokerInfo(
             name="dhan",
             label="Dhan",

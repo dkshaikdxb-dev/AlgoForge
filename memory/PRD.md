@@ -95,3 +95,16 @@ Build a modular & scalable AI-first hybrid algorithmic trading platform with: da
   - `lib/api.js` already auto-attaches `Idempotency-Key` UUID per paper-order POST.
 - **Deferred (non-bugs, would risk regression)**: 5 component-complexity refactors (Backtest/PaperExecution/Brokers/Dashboard/MultiLegBuilder splits), `run_backtest`/`scan_traps`/`get_options_chain` function extractions, localStorage → httpOnly cookie auth migration (requires CSRF middleware + backend cookie session rework).
 - **Tests**: 59/59 backend pass (+8 new in TestIter5CodeReviewFixes). Lint clean across both stacks.
+
+## Iteration 6 (2026-02-29) — P0 broker prep (no keys needed)
+- **Normalized order schema** (`brokers/schemas.py`): `NormalizedOrderRequest`, `NormalizedOrder`, `NormalizedPosition`, `NormalizedOrderEvent`, `BrokerCapabilities`. Enums: `OrderStatus`, `ReconciliationState`, `RejectionReason`. All cross-broker code reads/writes these types.
+- **Broker adapter ABC** (`brokers/base.py`): `BrokerAdapter` with 6 abstract methods + capabilities. Typed error hierarchy (`BrokerUnavailable`, `BrokerAuthError`, `BrokerRateLimited`, `BrokerOrderRejected`, `BrokerNetworkError`, `BrokerTimeoutError`, `BrokerUnexpectedError`) where each declares `retryable`. `call_with_retry()` does exponential backoff + jitter; per-`(user_id, broker)` circuit breaker (3 failures / 30s → open 60s).
+- **Reference adapter** (`brokers/paper_adapter.py`): `PaperAdapter` fully implements the ABC and is the template for live adapters.
+- **Reconciliation service** (`services/reconciliation.py`): diff algorithm produces actions ADOPT_BROKER_ORDER / MARK_LOST / SYNC_STATUS / SYNC_FILL_QTY / NO_OP. Audit rows in `reconciliation_log` collection.
+- **New endpoints**: `GET /api/reconciliation/summary`, `GET /api/reconciliation/log`, `POST /api/reconciliation/run/{broker}`.
+- **Capability chips** exposed in `GET /api/brokers` (zerodha=7, upstox=6, dhan=5, icici=3, rmoney=1) and surfaced in the Brokers UI.
+- **Tests**: 70/71 pass (12/12 new + 58/59 regression; the 1 failure is a pre-existing iter5 import-path bug — fixed in this iteration).
+
+## Remaining
+- **P0**: Live broker wiring (Kite + Upstox) — blocked on user keys. When they arrive: pip-install SDKs, migrate `zerodha.py`/`upstox.py` to inherit `BrokerAdapter`, populate `live_orders` collection, kick off reconciler.
+- **P1**: Audit-log viewer (SEBI trace) · Monte Carlo stress tester · move paper logic to `services/`.

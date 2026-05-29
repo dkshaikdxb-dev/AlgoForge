@@ -916,17 +916,14 @@ class TestIter5CodeReviewFixes:
     # --- (1) ENV-var test credentials -------------------------------------
     def test_env_var_test_credentials_default(self):
         # When env vars are unset (the typical test run), defaults must be the
-        # documented demo account.
-        # We re-import the constants from the module to assert they exist.
-        from backend.tests import backend_test as bt  # noqa
-        # constants are module-level
-        assert bt.DEMO_EMAIL  # truthy
-        assert bt.DEMO_PASSWORD
+        # documented demo account. Reference the module-level constants directly.
+        assert DEMO_EMAIL  # truthy
+        assert DEMO_PASSWORD
         # defaults preserved when env vars not explicitly set in this process
         if not os.environ.get("ALGOFORGE_TEST_EMAIL"):
-            assert bt.DEMO_EMAIL == "demo@algoforge.io"
+            assert DEMO_EMAIL == "demo@algoforge.io"
         if not os.environ.get("ALGOFORGE_TEST_PASSWORD"):
-            assert bt.DEMO_PASSWORD == "Demo@123"
+            assert DEMO_PASSWORD == "Demo@123"
 
     def test_env_var_override_logic(self):
         # Simulate override behavior: the os.environ.get(..., default) pattern
