@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -33,7 +34,20 @@ from routers import (
 )
 from ws_feed import router as ws_router
 
-app = FastAPI(title="AlgoForge — AI Trading Platform")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s — %(message)s")
+logger = logging.getLogger("algoforge")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    get_db()
+    await paper_router._ensure_idempotency_ttl()
+    logger.info("AlgoForge backend started (modular routers, idempotency TTL ready)")
+    yield
+    close_db()
+
+
+app = FastAPI(title="AlgoForge — AI Trading Platform", lifespan=lifespan)
 
 # All HTTP REST routes mounted under /api
 api = APIRouter(prefix="/api")
@@ -50,9 +64,7 @@ api.include_router(brokers_router.router)
 api.include_router(dashboard_router.router)
 app.include_router(api)
 
-# WebSocket router mounted both with and without /api prefix so frontend
-# can use REACT_APP_BACKEND_URL/api/ws/ticks (ingress maps /api/* → backend).
-app.include_router(ws_router)
+# WebSocket router mounted under /api (ingress routes /api/* to backend)
 api_ws = APIRouter(prefix="/api")
 api_ws.include_router(ws_router)
 app.include_router(api_ws)
@@ -64,17 +76,3 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s — %(message)s")
-logger = logging.getLogger("algoforge")
-
-
-@app.on_event("startup")
-async def on_startup():
-    get_db()
-    logger.info("AlgoForge backend started (modular routers)")
-
-
-@app.on_event("shutdown")
-async def on_shutdown():
-    close_db()

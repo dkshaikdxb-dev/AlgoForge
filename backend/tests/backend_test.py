@@ -224,8 +224,10 @@ class TestPaperAndRisk:
             "max_drawdown_pct": 15.0, "daily_loss_cap": 25000.0,
             "position_limit": 5, "kill_switch": False})
         auth.post(f"{BASE_URL}/api/paper/flatten")
-        r = auth.post(f"{BASE_URL}/api/paper/order", json={
-            "symbol": "NIFTY", "side": "BUY", "qty": 50, "instrument_type": "EQ"})
+        # use fresh idempotency key so we don't replay a prior cached response
+        r = auth.post(f"{BASE_URL}/api/paper/order",
+                      json={"symbol": "NIFTY", "side": "BUY", "qty": 50, "instrument_type": "EQ"},
+                      headers={"Idempotency-Key": f"test-{uuid.uuid4().hex}"})
         assert r.status_code == 200, r.text
         assert r.json()["status"] == "FILLED"
         pos = auth.get(f"{BASE_URL}/api/paper/positions").json()
@@ -404,7 +406,8 @@ class TestMultiLeg:
                  "symbol": "NIFTY", "option_strike": atm, "option_kind": "PE"},
             ],
         }
-        r = auth.post(f"{BASE_URL}/api/paper/order/multi-leg", json=payload)
+        r = auth.post(f"{BASE_URL}/api/paper/order/multi-leg", json=payload,
+                      headers={"Idempotency-Key": f"test-{uuid.uuid4().hex}"})
         assert r.status_code == 200, r.text
         d = r.json()
         assert "basket_id" in d
@@ -464,4 +467,274 @@ class TestWebSocketTicks:
         for tk in msgs[1]["ticks"]:
             for k in ("symbol", "ltp", "open", "change", "change_pct", "ts"):
                 assert k in tk, f"missing {k} in tick {tk}"
+
+
+
+# ---------- Helpers for iteration 4 ----------
+
+def _fresh_key():
+    return f"test-{uuid.uuid4().hex}"
+
+
+def _ensure_kill_off(auth):
+    auth.put(f"{BASE_URL}/api/risk/limits", json={
+        "max_drawdown_pct": 15.0, "daily_loss_cap": 25000.0,
+        "position_limit": 50, "kill_switch": False})
+
+
+# ---------- Literal validation (iteration 4) ----------
+class TestLiteralValidation:
+    def test_invalid_side_hold(self, auth):
+        r = auth.post(f"{BASE_URL}/api/paper/order", json={
+            "symbol": "TCS", "side": "HOLD", "qty": 1, "instrument_type": "EQ"
+        }, headers={"Idempotency-Key": _fresh_key()})
+        assert r.status_code == 422, r.text
+        body = r.text
+        assert "BUY" in body and "SELL" in body
+
+    def test_invalid_side_lowercase(self, auth):
+        r = auth.post(f"{BASE_URL}/api/paper/order", json={
+            "symbol": "TCS", "side": "buy", "qty": 1, "instrument_type": "EQ"
+        }, headers={"Idempotency-Key": _fresh_key()})
+        assert r.status_code == 422
+
+    def test_invalid_instrument_type(self, auth):
+        r = auth.post(f"{BASE_URL}/api/paper/order", json={
+            "symbol": "TCS", "side": "BUY", "qty": 1, "instrument_type": "FUT"
+        }, headers={"Idempotency-Key": _fresh_key()})
+        assert r.status_code == 422
+
+    def test_invalid_option_kind(self, auth):
+        r = auth.post(f"{BASE_URL}/api/paper/order", json={
+            "symbol": "NIFTY", "side": "BUY", "qty": 1,
+            "instrument_type": "OPT", "option_strike": 22000, "option_kind": "X"
+        }, headers={"Idempotency-Key": _fresh_key()})
+        assert r.status_code == 422
+
+    def test_invalid_order_type(self, auth):
+        r = auth.post(f"{BASE_URL}/api/paper/order", json={
+            "symbol": "TCS", "side": "BUY", "qty": 1,
+            "order_type": "STOP", "instrument_type": "EQ"
+        }, headers={"Idempotency-Key": _fresh_key()})
+        assert r.status_code == 422
+
+    def test_multi_leg_invalid_side(self, auth):
+        r = auth.post(f"{BASE_URL}/api/paper/order/multi-leg", json={
+            "name": "Bad",
+            "legs": [{"side": "HOLD", "instrument_type": "OPT", "qty": 50,
+                      "symbol": "NIFTY", "option_strike": 22000, "option_kind": "CE"}]
+        }, headers={"Idempotency-Key": _fresh_key()})
+        assert r.status_code == 422
+
+    def test_multi_leg_invalid_option_kind(self, auth):
+        r = auth.post(f"{BASE_URL}/api/paper/order/multi-leg", json={
+            "name": "Bad",
+            "legs": [{"side": "BUY", "instrument_type": "OPT", "qty": 50,
+                      "symbol": "NIFTY", "option_strike": 22000, "option_kind": "X"}]
+        }, headers={"Idempotency-Key": _fresh_key()})
+        assert r.status_code == 422
+
+
+# ---------- Duplicate prevention (iteration 4) ----------
+class TestDuplicatePrevention:
+    def test_duplicate_rejected_with_different_idem_keys(self, auth):
+        _ensure_kill_off(auth)
+        auth.post(f"{BASE_URL}/api/paper/flatten")
+        payload = {"symbol": "TCS", "side": "BUY", "qty": 10, "instrument_type": "EQ"}
+        r1 = auth.post(f"{BASE_URL}/api/paper/order", json=payload,
+                       headers={"Idempotency-Key": _fresh_key()})
+        assert r1.status_code == 200, r1.text
+        assert "idempotency_key" in r1.json()
+
+        r2 = auth.post(f"{BASE_URL}/api/paper/order", json=payload,
+                       headers={"Idempotency-Key": _fresh_key()})
+        assert r2.status_code == 409, r2.text
+        detail = r2.json().get("detail", "")
+        assert "Duplicate order detected" in detail
+        assert "force=true" in detail
+
+    def test_force_bypass_succeeds(self, auth):
+        _ensure_kill_off(auth)
+        auth.post(f"{BASE_URL}/api/paper/flatten")
+        payload = {"symbol": "INFY", "side": "BUY", "qty": 5, "instrument_type": "EQ"}
+        r1 = auth.post(f"{BASE_URL}/api/paper/order", json=payload,
+                       headers={"Idempotency-Key": _fresh_key()})
+        assert r1.status_code == 200, r1.text
+        r2 = auth.post(f"{BASE_URL}/api/paper/order?force=true", json=payload,
+                       headers={"Idempotency-Key": _fresh_key()})
+        assert r2.status_code == 200, r2.text
+
+    def test_dup_window_expires(self, auth):
+        _ensure_kill_off(auth)
+        auth.post(f"{BASE_URL}/api/paper/flatten")
+        payload = {"symbol": "HDFCBANK", "side": "BUY", "qty": 3, "instrument_type": "EQ"}
+        r1 = auth.post(f"{BASE_URL}/api/paper/order", json=payload,
+                       headers={"Idempotency-Key": _fresh_key()})
+        assert r1.status_code == 200, r1.text
+        time.sleep(6.5)
+        r2 = auth.post(f"{BASE_URL}/api/paper/order", json=payload,
+                       headers={"Idempotency-Key": _fresh_key()})
+        assert r2.status_code == 200, r2.text
+
+
+# ---------- Idempotency (iteration 4) ----------
+class TestIdempotency:
+    def test_idempotency_replay_single(self, auth):
+        _ensure_kill_off(auth)
+        auth.post(f"{BASE_URL}/api/paper/flatten")
+        key = _fresh_key()
+        payload = {"symbol": "RELIANCE", "side": "BUY", "qty": 7, "instrument_type": "EQ"}
+        r1 = auth.post(f"{BASE_URL}/api/paper/order", json=payload,
+                       headers={"Idempotency-Key": key})
+        assert r1.status_code == 200, r1.text
+        first = r1.json()
+        assert first.get("idempotency_key") == key
+        assert "id" in first
+        assert not first.get("idempotent_replay")
+
+        r2 = auth.post(f"{BASE_URL}/api/paper/order", json=payload,
+                       headers={"Idempotency-Key": key})
+        assert r2.status_code == 200, r2.text
+        second = r2.json()
+        assert second["id"] == first["id"]
+        assert second.get("idempotent_replay") is True
+
+    def test_auto_idempotency_without_header(self, auth):
+        _ensure_kill_off(auth)
+        auth.post(f"{BASE_URL}/api/paper/flatten")
+        # randomized qty so signature differs per test run (avoids 24h TTL replay)
+        unique_qty = (uuid.uuid4().int % 90) + 10
+        payload = {"symbol": "BANKNIFTY", "side": "BUY", "qty": unique_qty, "instrument_type": "EQ"}
+        r1 = auth.post(f"{BASE_URL}/api/paper/order", json=payload)
+        assert r1.status_code == 200, r1.text
+        first = r1.json()
+        assert "idempotency_key" in first and first["idempotency_key"]
+        assert not first.get("idempotent_replay")
+
+        r2 = auth.post(f"{BASE_URL}/api/paper/order", json=payload)
+        assert r2.status_code == 200, r2.text
+        second = r2.json()
+        assert second["id"] == first["id"]
+        assert second.get("idempotent_replay") is True
+
+    def test_multi_leg_idempotency_replay(self, auth):
+        _ensure_kill_off(auth)
+        auth.post(f"{BASE_URL}/api/paper/flatten")
+        chain = auth.get(f"{BASE_URL}/api/market/options-chain", params={"symbol": "NIFTY"}).json()
+        atm = chain["rows"][len(chain["rows"]) // 2]["strike"]
+        payload = {
+            "name": "Replay Straddle",
+            "legs": [
+                {"side": "BUY", "instrument_type": "OPT", "qty": 25,
+                 "symbol": "NIFTY", "option_strike": atm, "option_kind": "CE"},
+                {"side": "BUY", "instrument_type": "OPT", "qty": 25,
+                 "symbol": "NIFTY", "option_strike": atm, "option_kind": "PE"},
+            ],
+        }
+        key = _fresh_key()
+        r1 = auth.post(f"{BASE_URL}/api/paper/order/multi-leg", json=payload,
+                       headers={"Idempotency-Key": key})
+        assert r1.status_code == 200, r1.text
+        d1 = r1.json()
+        bid1 = d1["basket_id"]
+
+        r2 = auth.post(f"{BASE_URL}/api/paper/order/multi-leg", json=payload,
+                       headers={"Idempotency-Key": key})
+        assert r2.status_code == 200, r2.text
+        d2 = r2.json()
+        assert d2["basket_id"] == bid1
+        assert d2.get("idempotent_replay") is True
+
+        # positions reflect only ONE basket fill (2 positions, not 4)
+        pos = auth.get(f"{BASE_URL}/api/paper/positions").json()["positions"]
+        nifty_opts = [p for p in pos if p["symbol"] == "NIFTY" and p.get("instrument_type") == "OPT"]
+        assert len(nifty_opts) == 2, nifty_opts
+        # qty per position is 25 (BUY) — not doubled
+        for p in nifty_opts:
+            assert p["qty"] == 25, p
+        auth.post(f"{BASE_URL}/api/paper/flatten")
+
+
+# ---------- Basket pre-flight rollback (iteration 4) ----------
+class TestBasketRollback:
+    def test_invalid_strike_preflight_no_partial_fill(self, auth):
+        _ensure_kill_off(auth)
+        auth.post(f"{BASE_URL}/api/paper/flatten")
+        chain = auth.get(f"{BASE_URL}/api/market/options-chain", params={"symbol": "NIFTY"}).json()
+        good_strike = chain["rows"][len(chain["rows"]) // 2]["strike"]
+
+        pos_before = len(auth.get(f"{BASE_URL}/api/paper/positions").json()["positions"])
+
+        payload = {
+            "name": "BadBasket",
+            "legs": [
+                {"side": "BUY", "instrument_type": "OPT", "qty": 25,
+                 "symbol": "NIFTY", "option_strike": good_strike, "option_kind": "CE"},
+                {"side": "BUY", "instrument_type": "OPT", "qty": 25,
+                 "symbol": "NIFTY", "option_strike": 99999, "option_kind": "PE"},
+            ],
+        }
+        r = auth.post(f"{BASE_URL}/api/paper/order/multi-leg", json=payload,
+                      headers={"Idempotency-Key": _fresh_key()})
+        assert r.status_code == 400, r.text
+        detail = r.json().get("detail", "")
+        # 0-indexed; leg index 1 is the bad one
+        assert "Leg 1" in detail
+        assert "99999" in detail
+
+        pos_after = len(auth.get(f"{BASE_URL}/api/paper/positions").json()["positions"])
+        assert pos_after == pos_before, "Pre-flight should not partially fill"
+
+    def test_multi_leg_success_persists_basket(self, auth):
+        _ensure_kill_off(auth)
+        auth.post(f"{BASE_URL}/api/paper/flatten")
+        chain = auth.get(f"{BASE_URL}/api/market/options-chain", params={"symbol": "NIFTY"}).json()
+        atm = chain["rows"][len(chain["rows"]) // 2]["strike"]
+        payload = {
+            "name": "OK Basket",
+            "legs": [
+                {"side": "BUY", "instrument_type": "OPT", "qty": 25,
+                 "symbol": "NIFTY", "option_strike": atm, "option_kind": "CE"},
+                {"side": "BUY", "instrument_type": "OPT", "qty": 25,
+                 "symbol": "NIFTY", "option_strike": atm, "option_kind": "PE"},
+            ],
+        }
+        r = auth.post(f"{BASE_URL}/api/paper/order/multi-leg", json=payload,
+                      headers={"Idempotency-Key": _fresh_key()})
+        assert r.status_code == 200, r.text
+        bid = r.json()["basket_id"]
+        # verify orders endpoint returns basket_id, basket_pending=False
+        orders = auth.get(f"{BASE_URL}/api/paper/orders").json()["orders"]
+        basket_orders = [o for o in orders if o.get("basket_id") == bid]
+        assert len(basket_orders) == 2, basket_orders
+        for o in basket_orders:
+            assert o.get("basket_pending") is False
+        auth.post(f"{BASE_URL}/api/paper/flatten")
+
+
+# ---------- Idempotency TTL index (iteration 4) ----------
+class TestIdempotencyTTL:
+    def test_ttl_index_present(self):
+        import os as _os
+        from pymongo import MongoClient
+        mc = MongoClient(_os.environ.get("MONGO_URL", "mongodb://localhost:27017"))
+        db = mc[_os.environ.get("DB_NAME", "test_database")]
+        indexes = list(db.idempotency_keys.list_indexes())
+        ttl_idx = [i for i in indexes if "expireAfterSeconds" in i]
+        assert ttl_idx, f"No TTL index found in idempotency_keys: {indexes}"
+        # 24h = 86400s
+        assert any(i.get("expireAfterSeconds") == 86400 for i in ttl_idx), ttl_idx
+
+
+# ---------- Lifespan / startup log ----------
+class TestLifespan:
+    def test_no_on_event_deprecation_and_startup_log(self):
+        import subprocess
+        # Look at recent supervisor backend logs
+        out = subprocess.run(
+            ["bash", "-c", "tail -n 400 /var/log/supervisor/backend.*.log 2>/dev/null || true"],
+            capture_output=True, text=True, timeout=10
+        ).stdout
+        assert "AlgoForge backend started" in out, "Startup log line missing"
+        assert "on_event is deprecated" not in out, "on_event deprecation warning still present"
 

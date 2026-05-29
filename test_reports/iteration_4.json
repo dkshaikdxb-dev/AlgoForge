@@ -1,0 +1,38 @@
+{
+  "summary": "Iteration 4 backend regression + new behaviors (Literal validation, idempotency, dup-prevention, basket rollback, TTL, lifespan). Extended backend_test.py with 4 new classes (TestLiteralValidation, TestDuplicatePrevention, TestIdempotency, TestBasketRollback) plus TTL & Lifespan checks. Full suite: 51/51 PASS in 45s. All 14 spec items from the review request verified end-to-end via the public REACT_APP_BACKEND_URL.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Behavior change: idempotency cache lives for 24h. Two identical POSTs to /api/paper/order with no Idempotency-Key header within 24h will return the cached response (idempotent_replay=true) — meaning the SECOND order will NOT create a new position. Existing regression test_place_eq_order_and_position and test_long_straddle broke on rerun for this exact reason; fixed by injecting a fresh Idempotency-Key header per test. Frontend should generate a UUID per user click and send it as Idempotency-Key, otherwise legitimate repeat orders (e.g. user clicks BUY twice intentionally after market move) will silently no-op for 24h.",
+    "Multi-leg basket rollback is best-effort on standalone Mongo (no real txn). Pre-flight validates all legs first, which catches the spec'd 'bad strike' case before any insert — verified zero partial fills. But a runtime DB failure mid-loop relies on _undo_order/_restore_position swallowing exceptions; if rollback itself fails the user is left inconsistent. Consider Mongo transactions when replica set is available.",
+    "_check_duplicate uses isoformat string comparison on created_at — works because now_iso() emits ISO-8601 UTC with consistent precision, but a mongo date type would be safer.",
+    "place_paper_order's check_duplicate flag is honored for single-leg but NOT for multi-leg legs (legs bypass dup detection by design via place_paper_order helper not being used). Confirm intent: a basket with two identical CE BUYs back-to-back from a previous basket within 5s will succeed — not flagged as dup. Current behavior is acceptable for baskets (atomic intent) but worth documenting.",
+    "Force bypass (?force=true) only skips dup-detection; the idempotency cache still applies. The spec wording in the request acknowledges this — good.",
+    "Lifespan migration is clean. No deprecation warnings in supervisor logs; startup line 'AlgoForge backend started (modular routers, idempotency TTL ready)' present.",
+    "TTL index correctly created with expireAfterSeconds=86400 on idempotency_keys.created_at. Verified via list_indexes().",
+    "Literal types successfully reject HOLD/buy/FUT/STOP/X with 422; multi-leg legs validate per-leg.",
+    "Architectural nit (carry-over from iter 3): place_paper_order/compute_positions still live in routers/paper.py. Move to services/ when convenient."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py"
+  ],
+  "success_rate": {"backend": "100% (51/51)", "frontend": "not tested per request"},
+  "test_credentials": "demo@algoforge.io / Demo@123 (works, pre-seeded)",
+  "seed_data_creation": "Tests create transient TEST_* users via register, broker_connections (zerodha/rmoney), paper positions on NIFTY/TCS/INFY/RELIANCE/HDFCBANK/BANKNIFTY, baskets, and clean up via /api/paper/flatten + DELETE /api/brokers/<n>. Idempotency keys persist in idempotency_keys collection for up to 24h (by design).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Idempotency 24h TTL has a real side-effect on regression tests: any test sending the same paper-order body twice will be replayed unless a fresh Idempotency-Key header is supplied. backend_test.py now does this everywhere it matters. test_auto_idempotency_without_header uses a randomized qty per run so the auto-derived signature is unique. If you add new paper-order tests, ALWAYS pass headers={'Idempotency-Key': f'test-{uuid.uuid4().hex}'} unless you specifically want to exercise replay. Valid symbols on the mock market: NIFTY, BANKNIFTY, RELIANCE, TCS, HDFCBANK, INFY — DO NOT use HDFC/WIPRO/SBIN (404). idempotency_keys collection has TTL index (86400s) which auto-prunes — no manual cleanup needed.",
+  "rca_of_the_issue": "No bugs. All 14 new behaviors verified: (1) Literal validation returns 422 for HOLD/buy/FUT/X/STOP — pass. (2) Multi-leg leg Literal validation — pass. (3) Duplicate within 5s with DIFFERENT Idempotency-Keys → 409 with 'Duplicate order detected ... ?force=true' detail — pass. (4) After 6.5s wait, same payload succeeds — pass. (5) ?force=true bypasses dup — pass. (6) Same Idempotency-Key replays same id with idempotent_replay=true — pass. (7) Auto-idempotency without header — pass. (8) Multi-leg idempotency: same basket_id returned, positions reflect ONE fill (qty=25, not 50) — pass. (9) Multi-leg pre-flight: bad strike 99999 in leg-2 → 400 'Leg 1: Strike 99999 not in NIFTY chain' and position count unchanged — pass. (10) Empty legs[] → 400 — pass. (11) Kill switch blocks multi-leg with 423 — pass. (12) Multi-leg success persists basket doc; orders endpoint returns basket_id and basket_pending=false — pass. (13) idempotency_keys TTL index present with expireAfterSeconds=86400 — pass. (14) Lifespan: startup log present, no 'on_event is deprecated' warning — pass. Full regression (auth, market, strategies, backtest, risk, trap, paper EQ/OPT, journal, brokers, dashboard, WebSocket) — all 50 prior tests pass."
+}
