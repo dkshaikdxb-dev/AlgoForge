@@ -1,0 +1,105 @@
+{
+  "theme_and_archetype": {
+    "theme": "Dark",
+    "archetype": "Archetype 2 (Performance Pro) / Archetype 4 (Swiss & High-Contrast)",
+    "rationale": "High-density data cockpit for algo traders. Requires maximum legibility, clear semantic coloring (gains/losses), and a highly technical 'athletic/precision' feel. Rejects standard SaaS purple gradients and Bloomberg orange."
+  },
+  "typography": {
+    "fonts": [
+      {
+        "name": "Barlow Condensed",
+        "usage": "Massive KPI numbers and primary Hero headings",
+        "url": "https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700&display=swap"
+      },
+      {
+        "name": "Chivo",
+        "usage": "Section headings, Widget titles, Card headers",
+        "url": "https://fonts.googleapis.com/css2?family=Chivo:wght@400;500;700&display=swap"
+      },
+      {
+        "name": "IBM Plex Sans",
+        "usage": "Body text, labels, general UI elements",
+        "url": "https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+      },
+      {
+        "name": "JetBrains Mono",
+        "usage": "Data tables, prices, code/DSL viewer, specific numeric metrics",
+        "url": "https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap"
+      }
+    ],
+    "rules": {
+      "headings": "Tracking tight, uppercase overlines. High contrast.",
+      "numbers": "Always use tabular nums (font-variant-numeric: tabular-nums) or JetBrains Mono."
+    }
+  },
+  "colors": {
+    "background": {
+      "page": "#09090b",
+      "surface": "#18181b",
+      "surface_hover": "#27272a"
+    },
+    "border": {
+      "default": "#27272a",
+      "focus": "#52525b"
+    },
+    "text": {
+      "primary": "#ffffff",
+      "secondary": "#a1a1aa",
+      "muted": "#71717a"
+    },
+    "semantic": {
+      "profit_up": "#10B981",
+      "loss_down": "#EF4444",
+      "warning_trap": "#F59E0B",
+      "accent_blue": "#3b82f6",
+      "neutral_action": "#f4f4f5"
+    },
+    "rules": "Layered darkness. No pure black. Strict restraint on color; use it purely for state/meaning (gains/losses/alerts)."
+  },
+  "spacing_and_layout": {
+    "grid_system": "Control Room Grid. Base grid-cols-1 md:grid-cols-4 lg:grid-cols-12. Tight gaps (gap-4 or gap-6).",
+    "surface_strategy": "Grid Borders (The 'Technical' Look). Solid backgrounds. Sharp corners (`rounded-sm` max). No soft shadows, rely on 1px borders.",
+    "hierarchy": "Top-left for primary KPIs (P&L, Margin). Progressive disclosure for secondary data.",
+    "density": "High density. Minimize padding inside data tables (`p-2` or `p-3`). Generous padding around major structural sections (`p-6`)."
+  },
+  "components": {
+    "cards": "Flat solid background, 1px subtle border. No drop shadow. Hover state elevates slightly with border color darkening.",
+    "tables": "Dense. Left-align text, right-align numbers. Monospace font for digits. Sticky headers for scrolling.",
+    "buttons": "Sharp edges (`rounded-none` or `rounded-sm`). High contrast text on hover. Primary CTA is Stark White (#f4f4f5) with black text.",
+    "charts": "Recharts. Grid lines at 10% opacity. Neon-accent data lines. Avoid filled area charts unless gradient is 10% opacity max.",
+    "heatmaps": "Option Writers' Trap Detection uses a discrete 5-step color scale from Neutral Surface (#18181b) to Warning Amber (#F59E0B) to Red (#EF4444).",
+    "navigation": "Sticky top/side. Solid background. Hard border-bottom/right. No glassmorphism in dashboard context.",
+    "forms": "Inputs have 1px border. Focus state must have high-contrast ring.",
+    "testing": "All interactive elements MUST have `data-testid` attribute (e.g., `data-testid=\"kill-switch-button\"`)."
+  },
+  "motion_and_interactions": {
+    "hover_states": "Explicit text and border color changes. e.g. `hover:bg-zinc-800 hover:text-white`.",
+    "transitions": "Fast, mechanical micro-interactions (0.15s ease-out).",
+    "data_updates": "KPIs should flash subtle green/red background or text when real-time ticks update."
+  },
+  "icons": {
+    "library": "@phosphor-icons/react",
+    "style": "Regular or Bold (depending on scale). Keep stroke width consistent. Used heavily in dense dashboards."
+  },
+  "images": {
+    "auth_background": {
+      "url": "https://static.prod-images.emergentagent.com/jobs/5f5c09e7-cff3-4175-97eb-bbb4082159db/images/fc241036c09b649a1bdc45cfa57ef0079f7caa53d30e8c1770628d4c602ee158.png",
+      "description": "Abstract dark topographic map with glowing grid lines. Use as full-page background for Login/Register screens with an overlay of bg-zinc-950/80."
+    },
+    "hero_texture": {
+      "url": "https://static.prod-images.emergentagent.com/jobs/5f5c09e7-cff3-4175-97eb-bbb4082159db/images/65436be1983ef9fed6de5732fd421b4d8da7a6a68d974374a06b1660784f3d57.png",
+      "description": "Dark matte metal texture. Use as a subtle background layer for the top 'cockpit' KPI panel or AI Strategy Builder header, mixed with low opacity."
+    }
+  },
+  "instructions_to_main_agent": [
+    "Install and use Tailwind CSS with standard zinc palette configuration.",
+    "Install @phosphor-icons/react for icons.",
+    "Use standard HTML/Tailwind for the primary grid layout, employing 'display: grid' extensively.",
+    "Integrate Shadcn components (tables, dialogs, inputs) but strip border radii to 'rounded-sm' or 'rounded-none'.",
+    "Ensure all interactive elements and forms include 'data-testid' for testing.",
+    "Do NOT use Recharts if D3 is preferred for complex quant visualisations, but for standard lines/bars use Recharts. Given the brief, Recharts is sufficient for Equity curves and Drawdowns.",
+    "Implement Option Writers Trap Detection Heatmap using pure Tailwind grid/divs with varying opacity of background color.",
+    "All components must be built as .js files, NOT .tsx files. Use standard React JavaScript.",
+    "Enforce APCA contrast ratios. Avoid 'vibrating' text colors."
+  ]
+}
