@@ -1,0 +1,42 @@
+{
+  "summary": "First-time E2E testing of AlgoForge MVP. Backend: 25/25 pytest pass via public URL (auth, market data, strategies, backtest, AI risk, trap scan+explain, paper exec, risk limits/kill switch, journal, dashboard). Frontend: login, all 7 nav pages, strategy generate+save, backtest run with KPIs+equity curve+trades, AI Risk Review (Claude), Trap heatmap+AI explanation, paper order placement, kill-switch blocking — all functional with 0 console errors.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/backtest/run", "issue": "Raises uncaught KeyError -> HTTP 500 when DSL indicator object is missing the 'id' key (e.g., uses 'name' instead). Should validate DSL schema with Pydantic and return 400 with friendly message. Same risk if AI-generated DSL returns a slightly off shape."},
+      {"endpoint": "POST /api/auth/register", "issue": "Silently lowercases the email before persisting/returning. Acceptable, but the API response should match documented behavior — consider documenting or echoing the normalized email explicitly."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Dashboard /", "issues": ["Sonner 'Welcome back' toast (top-right) overlaps the Kill Switch toggle + 'NEW STRATEGY' button area for ~3 seconds after login, partially obscuring controls. Consider moving toast to top-center or bottom, or shortening duration."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Harden /api/backtest/run: validate DSL with Pydantic (indicators[].id required), return 400 on schema errors instead of 500.",
+    "Optionally adjust toast placement on Dashboard to avoid overlap with cockpit header controls."
+  ],
+  "critical_code_review_comments": [
+    "backtest_engine._compute_indicators uses ind['id'] without .get() — will crash on any DSL deviation. The AI-generated DSL from GPT-5.2 is the primary upstream producer of this DSL, so a single malformed response will return 500 to the user.",
+    "server.py is ~470 lines and houses many resource domains; consider splitting into routers per domain (auth, market, strategies, backtest, paper, trap, journal) for maintainability as features grow.",
+    "paper_positions endpoint loops and calls get_options_chain per OPT position — fine for MVP but O(N) external lookups per request; cache chain per symbol within the request.",
+    "All endpoints return naked dicts; consider response_model Pydantic schemas for API contract guarantees and openapi docs.",
+    "ObjectId handling is correct (uses str uuid for _id everywhere)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py (newly created)"
+  ],
+  "success_rate": {"backend": "100% (25/25)", "frontend": "100% (all critical flows)"},
+  "test_credentials": "demo@algoforge.io / Demo@123 (pre-seeded, works)",
+  "seed_data_creation": "Tests create TEST_-prefixed strategies, backtests, paper orders, journal entries under the demo user. No cleanup performed — should not affect functionality but UI will show extra TEST_ items.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend public URL: https://quant-hybrid-trade.preview.emergentagent.com . Pytest file at /app/backend/tests/backend_test.py — use canonical DSL shape: indicators=[{id,type,period,source}], entry/exit={op,rules:[{left,cmp,right}]}, size={type:'fixed_qty', value:N}. NIFTY SMA10/SMA30 yields 0 trades by design (use RELIANCE SMA5/SMA20 days=300 for guaranteed trades — produced ~12 trades, Sharpe 1.42). AI endpoints succeed via fallback even without LLM. Kill switch returns HTTP 423.",
+  "rca_of_the_issue": "Backtest 500 RCA: backend/backtest_engine.py:88 uses dict subscript `ind['id']` instead of `.get('id')`; if upstream DSL (manual save or AI) lacks 'id' on an indicator, KeyError bubbles up as 500. Reproduction: POST /api/backtest/run with {\"dsl\": {\"symbol\":\"RELIANCE\",\"indicators\":[{\"type\":\"sma\",\"name\":\"fast\",\"period\":5}], ...}} -> 500. Mitigation: add Pydantic schema for DSL or wrap engine call in try/except and return 400."
+}

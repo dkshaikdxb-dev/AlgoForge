@@ -2,114 +2,217 @@
 @tailwind components;
 @tailwind utilities;
 
+@import url("https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700&family=Chivo:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap");
+
+:root {
+  /* AlgoForge — Performance Pro / Swiss High-Contrast */
+  --bg-page: #09090b;
+  --bg-surface: #18181b;
+  --bg-surface-2: #27272a;
+  --border: #27272a;
+  --border-strong: #3f3f46;
+  --text-primary: #ffffff;
+  --text-secondary: #a1a1aa;
+  --text-muted: #71717a;
+  --profit: #10b981;
+  --loss: #ef4444;
+  --warn: #f59e0b;
+  --accent: #3b82f6;
+  --neutral: #f4f4f5;
+}
+
+@layer base {
+  :root {
+    --background: 240 6% 6%;
+    --foreground: 0 0% 100%;
+    --card: 240 5% 11%;
+    --card-foreground: 0 0% 100%;
+    --popover: 240 5% 11%;
+    --popover-foreground: 0 0% 100%;
+    --primary: 0 0% 96%;
+    --primary-foreground: 0 0% 6%;
+    --secondary: 240 4% 16%;
+    --secondary-foreground: 0 0% 96%;
+    --muted: 240 4% 16%;
+    --muted-foreground: 240 5% 65%;
+    --accent: 217 91% 60%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 4% 16%;
+    --input: 240 4% 16%;
+    --ring: 240 5% 35%;
+    --radius: 0.125rem;
+  }
+}
+
+html,
 body {
-    margin: 0;
-    font-family:
-        -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen",
-        "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue",
-        sans-serif;
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
+  background: var(--bg-page);
+  color: var(--text-primary);
+  font-family: "IBM Plex Sans", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: "tnum" 1, "ss01" 1;
 }
 
-code {
-    font-family:
-        source-code-pro, Menlo, Monaco, Consolas, "Courier New", monospace;
+* {
+  border-color: var(--border);
 }
 
-@layer base {
-    :root {
-        --background: 0 0% 100%;
-        --foreground: 0 0% 3.9%;
-        --card: 0 0% 100%;
-        --card-foreground: 0 0% 3.9%;
-        --popover: 0 0% 100%;
-        --popover-foreground: 0 0% 3.9%;
-        --primary: 0 0% 9%;
-        --primary-foreground: 0 0% 98%;
-        --secondary: 0 0% 96.1%;
-        --secondary-foreground: 0 0% 9%;
-        --muted: 0 0% 96.1%;
-        --muted-foreground: 0 0% 45.1%;
-        --accent: 0 0% 96.1%;
-        --accent-foreground: 0 0% 9%;
-        --destructive: 0 84.2% 60.2%;
-        --destructive-foreground: 0 0% 98%;
-        --border: 0 0% 89.8%;
-        --input: 0 0% 89.8%;
-        --ring: 0 0% 3.9%;
-        --chart-1: 12 76% 61%;
-        --chart-2: 173 58% 39%;
-        --chart-3: 197 37% 24%;
-        --chart-4: 43 74% 66%;
-        --chart-5: 27 87% 67%;
-        --radius: 0.5rem;
-    }
-    .dark {
-        --background: 0 0% 3.9%;
-        --foreground: 0 0% 98%;
-        --card: 0 0% 3.9%;
-        --card-foreground: 0 0% 98%;
-        --popover: 0 0% 3.9%;
-        --popover-foreground: 0 0% 98%;
-        --primary: 0 0% 98%;
-        --primary-foreground: 0 0% 9%;
-        --secondary: 0 0% 14.9%;
-        --secondary-foreground: 0 0% 98%;
-        --muted: 0 0% 14.9%;
-        --muted-foreground: 0 0% 63.9%;
-        --accent: 0 0% 14.9%;
-        --accent-foreground: 0 0% 98%;
-        --destructive: 0 62.8% 30.6%;
-        --destructive-foreground: 0 0% 98%;
-        --border: 0 0% 14.9%;
-        --input: 0 0% 14.9%;
-        --ring: 0 0% 83.1%;
-        --chart-1: 220 70% 50%;
-        --chart-2: 160 60% 45%;
-        --chart-3: 30 80% 55%;
-        --chart-4: 280 65% 60%;
-        --chart-5: 340 75% 55%;
-    }
+::selection {
+  background: var(--accent);
+  color: white;
 }
 
-@layer base {
-    * {
-        @apply border-border;
-    }
-    body {
-        @apply bg-background text-foreground;
-    }
+/* Custom thin scrollbar */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-page);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--bg-surface-2);
+  border: 2px solid var(--bg-page);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border-strong);
 }
 
-@layer base {
-    [data-debug-wrapper="true"] {
-        display: contents !important;
-    }
+/* Typography helpers */
+.font-display {
+  font-family: "Barlow Condensed", sans-serif;
+  letter-spacing: -0.01em;
+}
+.font-mono-data {
+  font-family: "JetBrains Mono", monospace;
+  font-variant-numeric: tabular-nums;
+}
+.font-section {
+  font-family: "Chivo", sans-serif;
+}
+.kpi-num {
+  font-family: "Barlow Condensed", sans-serif;
+  font-weight: 700;
+  font-feature-settings: "tnum" 1;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
 
-    [data-debug-wrapper="true"] > * {
-        margin-left: inherit;
-        margin-right: inherit;
-        margin-top: inherit;
-        margin-bottom: inherit;
-        padding-left: inherit;
-        padding-right: inherit;
-        padding-top: inherit;
-        padding-bottom: inherit;
-        column-gap: inherit;
-        row-gap: inherit;
-        gap: inherit;
-        border-left-width: inherit;
-        border-right-width: inherit;
-        border-top-width: inherit;
-        border-bottom-width: inherit;
-        border-left-style: inherit;
-        border-right-style: inherit;
-        border-top-style: inherit;
-        border-bottom-style: inherit;
-        border-left-color: inherit;
-        border-right-color: inherit;
-        border-top-color: inherit;
-        border-bottom-color: inherit;
-    }
+/* Overline */
+.overline {
+  font-family: "Chivo", sans-serif;
+  font-size: 0.625rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+/* Grid line panel */
+.panel {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+}
+.panel-hover {
+  transition: border-color 0.15s ease-out;
+}
+.panel-hover:hover {
+  border-color: var(--border-strong);
+}
+
+/* Profit/loss color */
+.txt-profit {
+  color: var(--profit);
+}
+.txt-loss {
+  color: var(--loss);
+}
+.txt-warn {
+  color: var(--warn);
+}
+.txt-muted {
+  color: var(--text-muted);
+}
+.txt-secondary {
+  color: var(--text-secondary);
+}
+
+/* Buttons sharper feel */
+button,
+[role="button"] {
+  letter-spacing: 0.02em;
+}
+
+/* Subtle grid background for hero */
+.grid-bg {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+/* Pulse for trap heatmap cells */
+@keyframes tickFlash {
+  0% {
+    background-color: rgba(16, 185, 129, 0.25);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+.tick-flash-up {
+  animation: tickFlash 0.6s ease-out;
+}
+@keyframes tickFlashDown {
+  0% {
+    background-color: rgba(239, 68, 68, 0.25);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+.tick-flash-down {
+  animation: tickFlashDown 0.6s ease-out;
+}
+
+/* DSL viewer */
+.dsl-viewer {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre;
+  overflow: auto;
+}
+
+/* Trap heatmap step colors via opacity utility */
+.heat-0 {
+  background: #18181b;
+}
+.heat-1 {
+  background: rgba(245, 158, 11, 0.18);
+}
+.heat-2 {
+  background: rgba(245, 158, 11, 0.38);
+}
+.heat-3 {
+  background: rgba(239, 68, 68, 0.55);
+}
+.heat-4 {
+  background: rgba(239, 68, 68, 0.85);
+  color: #fff;
+}
+
+/* Section divider */
+.section-rule {
+  border-top: 1px solid var(--border);
+}
+
+/* Layered text on hero */
+.hero-overlay {
+  background:
+    radial-gradient(80% 50% at 20% 0%, rgba(59, 130, 246, 0.06), transparent 60%),
+    radial-gradient(60% 40% at 90% 100%, rgba(16, 185, 129, 0.05), transparent 60%);
 }
