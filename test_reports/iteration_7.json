@@ -1,0 +1,50 @@
+{
+  "summary": "Iteration 7 — SEBI audit-log viewer. Added TestIter7AuditLog with 22 tests covering /api/audit/{types,events,export}, SEBI 6-step trace (SIGNAL/DECISION/REQUEST/RESPONSE/FILL/OVERRIDE), filters (event_types/severities/q/from_ts/cursor), pagination, CSV export, indexes, and instrumentation hooks in paper/risk/brokers/strategies/backtest/trap/auth routers. REQUEST+FILL share correlation_id=order_id; OVERRIDE recorded HIGH for ?force=true; DUPLICATE_BLOCKED recorded WARN on 5s-window duplicates; KILL_SWITCH (HIGH) toggles with payload.from/to; RISK_POLICY_CHANGE carries payload.diffs; broker connect/test/disconnect, strategy_saved, backtest_run, trap signal, auth_login all verified. All 22 iter7 tests pass. Regression: all 71 prior tests still pass (93/93 total).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "GET /api/audit/events",
+        "issue": "Search filter `?q=` uses an unescaped regex (services/audit.py:133 → `{\"$regex\": q, \"$options\": \"i\"}`). User-supplied special regex characters (e.g. '.', '(', '[') will be interpreted as regex. Low-risk because endpoint is auth-scoped, but `re.escape(q)` is a one-line hardening fix and also avoids DoS via catastrophic backtracking."
+      },
+      {
+        "endpoint": "services/audit.py::query_events",
+        "issue": "Cursor pagination uses ts string comparison. With ISO-8601 in UTC + same precision (now_iso) this works, but rapid events sharing identical ts could miss a row at the boundary. Consider compound (ts, _id) cursor for strict stability under bursts (e.g. multi-leg basket emits 2N events per ms)."
+      },
+      {
+        "endpoint": "routers/audit.py::audit_export",
+        "issue": "Export filename is fixed to algoforge-audit.csv. Recommend including ISO date so re-exports don't overwrite on the client (e.g. algoforge-audit-2026-01-15.csv)."
+      }
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/iter7_full_results.xml",
+    "/app/test_reports/pytest/iter7_results.xml"
+  ],
+  "action_items": [
+    "(Nice-to-have) Escape user input in services/audit.py before passing to $regex on summary search.",
+    "(Nice-to-have) Make CSV export filename include date stamp.",
+    "(Optional hardening) Switch cursor pagination to compound (ts, _id) to survive same-ms event bursts."
+  ],
+  "critical_code_review_comments": [
+    "services/audit.py — record_event() correctly swallows all exceptions, ensuring audit failures never break trading flows. Good defensive design.",
+    "services/audit.py — `now_iso` ts as string works for $lt/$gte sort because format is lexicographically ordered (ISO-8601 UTC). Documented assumption — keep now_iso() locked to this format.",
+    "services/audit.py — summary truncated to 500 chars; payload not size-capped. Very large payloads (e.g. full basket DSL) could bloat the collection; consider a soft cap or moving large blobs to GridFS keyed by correlation_id.",
+    "routers/paper.py — REQUEST + FILL emit AFTER insert_one and AFTER position mutation; correlation_id=oid is set; sequence is correct. However, idempotency-replay path returns cached response WITHOUT emitting audit events — that is the right call (replay isn't a new event) but ensure docs make that explicit so SEBI auditors don't get confused by missing REQUEST when a client retries.",
+    "routers/audit.py — query parsing strips CSV correctly; consider `Query(..., regex=...)` to whitelist event_type tokens against AuditEventType enum to fail-fast on typos (currently silently returns empty result set).",
+    "auth.py — failed login records user_id=None → stored as 'anonymous'. Verified. user_agent and ip not captured; consider piping Request into auth routes via Depends to enrich audit (low-priority).",
+    "server.py lifespan — _audit_ensure_indexes is awaited at startup; on cold start a very first request might race index creation, but Mongo create_index is idempotent and tolerant. Acceptable."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py (appended TestIter7AuditLog — 22 tests)"
+  ],
+  "success_rate": {"backend": "93/93 = 100% (22 iter7 + 71 prior)", "frontend": "not tested (backend-only per request)"},
+  "test_credentials": "demo@algoforge.io / Demo@123 (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "None. Tests reuse seeded demo user. A few audit events are produced during tests (paper orders, broker connect/disconnect, strategies, backtest, trap scan, risk-limit toggles) — intentionally NOT cleaned up since audit_events is append-only by SEBI requirement.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "TestIter7AuditLog is appended at end of /app/backend/tests/backend_test.py. Run: `set -a; source /app/backend/.env; set +a; export REACT_APP_BACKEND_URL=<frontend .env value>; pytest /app/backend/tests/backend_test.py -v`. Two notes for stability: (1) test_duplicate_blocked_records_warn retries on 503 ingress hiccups (preview env intermittently 503s rapid back-to-back POSTs); (2) test_audit_indexes_exist opens a fresh AsyncIOMotorClient because the shared get_db() client's loop may be closed by prior tests. The audit_events collection accumulates across runs by design (SEBI append-only) — do NOT delete during cleanup. Frontend test IDs to use in next iter: nav-audit, audit-export-btn, audit-sebi-only-toggle, audit-type-{TYPE}, audit-row-{id}, audit-search-input, audit-load-more.",
+  "rca of the issue": "N/A — no functional bugs found. Two test-only issues encountered during dev and fixed in-place: (a) `Event loop is closed` on test_audit_indexes_exist when run after other async tests sharing the cached motor client → fixed by instantiating a fresh AsyncIOMotorClient inside the test; (b) test_paper_order_succeeds_even_if_audit_table_busy hit the 5s duplicate window from a sibling test → switched to ?force=true. Neither indicates a product bug."
+}

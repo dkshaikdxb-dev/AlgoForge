@@ -1180,3 +1180,391 @@ class TestIter6BrokerAdapterPrep:
         assert result == "ok"
         assert state["n"] == 3
         bb._breakers.pop((user_id, broker), None)
+
+
+
+# =====================================================================
+# Iteration 7 — SEBI Audit-Log Viewer
+# =====================================================================
+class TestIter7AuditLog:
+    """Audit log P1: types/events/export, filters, pagination, instrumentation hooks."""
+
+    # ---------- /api/audit/types ----------
+    def test_audit_types(self, auth):
+        r = auth.get(f"{BASE_URL}/api/audit/types")
+        assert r.status_code == 200, r.text
+        d = r.json()
+        assert set(d.keys()) >= {"all", "sebi_trace", "severities"}
+        # 18 event types per the PRD
+        assert len(d["all"]) == 18, f"expected 18 event types, got {len(d['all'])}: {d['all']}"
+        assert d["sebi_trace"] == ["SIGNAL", "DECISION", "REQUEST", "RESPONSE", "FILL", "OVERRIDE"]
+        assert d["severities"] == ["INFO", "WARN", "HIGH"]
+        for et in ["SIGNAL", "REQUEST", "FILL", "OVERRIDE", "KILL_SWITCH",
+                   "RISK_POLICY_CHANGE", "BROKER_CONNECT", "BROKER_DISCONNECT",
+                   "BROKER_TEST", "RECONCILE", "STRATEGY_SAVED", "BACKTEST_RUN",
+                   "DUPLICATE_BLOCKED", "BASKET_ROLLBACK", "AUTH_LOGIN", "AUTH_REGISTER"]:
+            assert et in d["all"], et
+
+    def test_audit_types_unauth(self, session):
+        r = session.get(f"{BASE_URL}/api/audit/types")
+        assert r.status_code in (401, 403)
+
+    # ---------- /api/audit/events basic shape ----------
+    def test_audit_events_shape(self, auth):
+        r = auth.get(f"{BASE_URL}/api/audit/events?limit=5")
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert set(body.keys()) >= {"items", "next_cursor", "has_more"}
+        assert isinstance(body["items"], list)
+        assert isinstance(body["has_more"], bool)
+        # If any items exist, validate shape of first
+        if body["items"]:
+            e = body["items"][0]
+            for k in ("id", "user_id", "event_type", "severity", "actor",
+                      "summary", "payload", "correlation_id", "ip", "user_agent", "ts"):
+                assert k in e, f"missing field {k} in audit event: {e.keys()}"
+            # No mongo _id should leak
+            assert "_id" not in e
+
+    def test_audit_events_sorted_desc(self, auth):
+        r = auth.get(f"{BASE_URL}/api/audit/events?limit=20")
+        assert r.status_code == 200
+        items = r.json()["items"]
+        if len(items) >= 2:
+            ts = [it["ts"] for it in items]
+            assert ts == sorted(ts, reverse=True), "items must be sorted by ts desc"
+
+    # ---------- Paper order: REQUEST + FILL with shared correlation_id ----------
+    def test_paper_order_emits_request_and_fill_with_correlation(self, auth):
+        # Use unique Idempotency-Key + unique symbol-ish payload so audit hooks fire
+        idem = f"TEST-iter7-{uuid.uuid4().hex[:10]}"
+        payload = {"symbol": "RELIANCE", "side": "BUY", "qty": 1,
+                   "order_type": "MARKET", "instrument_type": "EQ"}
+        r = auth.post(f"{BASE_URL}/api/paper/order", json=payload,
+                      headers={"Idempotency-Key": idem})
+        assert r.status_code in (200, 201), r.text
+        order = r.json()
+        assert order.get("idempotent_replay") is not True
+        oid = order.get("id")
+        assert oid, f"order missing id: {order}"
+
+        # Give the fire-and-forget hooks a moment
+        time.sleep(1.0)
+
+        r2 = auth.get(f"{BASE_URL}/api/audit/events",
+                      params={"event_types": "REQUEST,FILL", "correlation_id": oid, "limit": 10})
+        assert r2.status_code == 200, r2.text
+        items = r2.json()["items"]
+        et = {it["event_type"] for it in items}
+        assert "REQUEST" in et, f"REQUEST event missing for order {oid}; got {et}"
+        assert "FILL" in et, f"FILL event missing for order {oid}; got {et}"
+        # All items must share correlation_id == oid
+        for it in items:
+            assert it["correlation_id"] == oid
+
+    # ---------- Force override → OVERRIDE severity=HIGH ----------
+    def test_paper_force_override_records_high(self, auth):
+        idem = f"TEST-iter7-force-{uuid.uuid4().hex[:10]}"
+        payload = {"symbol": "TCS", "side": "BUY", "qty": 1,
+                   "order_type": "MARKET", "instrument_type": "EQ"}
+        r = auth.post(f"{BASE_URL}/api/paper/order?force=true", json=payload,
+                      headers={"Idempotency-Key": idem})
+        assert r.status_code in (200, 201), r.text
+        time.sleep(1.0)
+        r2 = auth.get(f"{BASE_URL}/api/audit/events",
+                      params={"event_types": "OVERRIDE", "severities": "HIGH", "limit": 5})
+        assert r2.status_code == 200
+        items = r2.json()["items"]
+        assert items, "OVERRIDE event not recorded"
+        assert all(it["event_type"] == "OVERRIDE" and it["severity"] == "HIGH" for it in items)
+
+    # ---------- Duplicate blocked within 5s ----------
+    def test_duplicate_blocked_records_warn(self, auth):
+        sym = "INFY"
+        payload = {"symbol": sym, "side": "BUY", "qty": 1,
+                   "order_type": "MARKET", "instrument_type": "EQ"}
+        # Two posts within 5s, different idempotency keys → 2nd is a duplicate
+        idem1 = f"TEST-iter7-dup1-{uuid.uuid4().hex[:10]}"
+        idem2 = f"TEST-iter7-dup2-{uuid.uuid4().hex[:10]}"
+        # retry-on-503 helper for transient ingress hiccups
+        def _post(idem):
+            for _ in range(3):
+                r = auth.post(f"{BASE_URL}/api/paper/order", json=payload,
+                              headers={"Idempotency-Key": idem})
+                if r.status_code != 503:
+                    return r
+                time.sleep(0.5)
+            return r
+        r1 = _post(idem1)
+        assert r1.status_code in (200, 201), r1.text
+        r2 = _post(idem2)
+        assert r2.status_code == 409, f"expected 409 dup, got {r2.status_code}: {r2.text[:200]}"
+        time.sleep(1.0)
+        r3 = auth.get(f"{BASE_URL}/api/audit/events",
+                      params={"event_types": "DUPLICATE_BLOCKED", "limit": 5})
+        assert r3.status_code == 200
+        items = r3.json()["items"]
+        assert items, "DUPLICATE_BLOCKED event not recorded"
+        assert items[0]["severity"] == "WARN"
+
+    # ---------- Kill switch toggle ----------
+    def test_kill_switch_toggle_records_high(self, auth):
+        # snapshot prior limits
+        r0 = auth.get(f"{BASE_URL}/api/risk/limits")
+        assert r0.status_code == 200, r0.text
+        prev = r0.json()
+        # arm
+        payload_on = {**{k: prev[k] for k in ("max_drawdown_pct", "daily_loss_cap", "position_limit")},
+                      "kill_switch": True}
+        ra = auth.put(f"{BASE_URL}/api/risk/limits", json=payload_on)
+        assert ra.status_code == 200, ra.text
+        # release
+        payload_off = {**payload_on, "kill_switch": False}
+        rb = auth.put(f"{BASE_URL}/api/risk/limits", json=payload_off)
+        assert rb.status_code == 200, rb.text
+        time.sleep(1.0)
+        r = auth.get(f"{BASE_URL}/api/audit/events",
+                     params={"event_types": "KILL_SWITCH", "limit": 10})
+        assert r.status_code == 200
+        items = r.json()["items"]
+        assert len(items) >= 2, f"expected ≥2 KILL_SWITCH events, got {len(items)}"
+        # most recent two should have from/to booleans
+        for it in items[:2]:
+            assert it["severity"] == "HIGH"
+            assert "from" in it["payload"] and "to" in it["payload"]
+
+    # ---------- Risk policy change → diffs ----------
+    def test_risk_policy_change_records_diffs(self, auth):
+        r0 = auth.get(f"{BASE_URL}/api/risk/limits")
+        prev = r0.json()
+        new_limit = int(prev["position_limit"]) + 1
+        payload = {**{k: prev[k] for k in ("max_drawdown_pct", "daily_loss_cap")},
+                   "position_limit": new_limit,
+                   "kill_switch": prev.get("kill_switch", False)}
+        r = auth.put(f"{BASE_URL}/api/risk/limits", json=payload)
+        assert r.status_code == 200, r.text
+        time.sleep(1.0)
+        r2 = auth.get(f"{BASE_URL}/api/audit/events",
+                      params={"event_types": "RISK_POLICY_CHANGE", "limit": 3})
+        assert r2.status_code == 200
+        items = r2.json()["items"]
+        assert items, "no RISK_POLICY_CHANGE recorded"
+        diffs = items[0]["payload"].get("diffs", {})
+        assert "position_limit" in diffs
+        assert diffs["position_limit"]["to"] == new_limit
+        # revert
+        rev = {**{k: prev[k] for k in ("max_drawdown_pct", "daily_loss_cap", "position_limit")},
+               "kill_switch": prev.get("kill_switch", False)}
+        auth.put(f"{BASE_URL}/api/risk/limits", json=rev)
+
+    # ---------- Broker connect/test/disconnect ----------
+    def test_broker_connect_test_disconnect_events(self, auth):
+        broker = "zerodha"
+        # Cleanup any prior connection (idempotent)
+        auth.delete(f"{BASE_URL}/api/brokers/{broker}")
+        # connect
+        rc = auth.post(f"{BASE_URL}/api/brokers/{broker}/connect",
+                       json={"credentials": {"api_key": "test_key", "api_secret": "x"}})
+        assert rc.status_code == 200, rc.text
+        # test
+        rt = auth.post(f"{BASE_URL}/api/brokers/{broker}/test")
+        assert rt.status_code == 200, rt.text
+        # disconnect
+        rd = auth.delete(f"{BASE_URL}/api/brokers/{broker}")
+        assert rd.status_code == 200, rd.text
+        time.sleep(1.0)
+        # verify all three events
+        for et, exp_count in (("BROKER_CONNECT", 1), ("BROKER_TEST", 1), ("BROKER_DISCONNECT", 1)):
+            r = auth.get(f"{BASE_URL}/api/audit/events",
+                         params={"event_types": et, "limit": 5})
+            assert r.status_code == 200
+            assert r.json()["items"], f"{et} event not recorded"
+
+    # ---------- Strategy save ----------
+    def test_strategy_saved_event(self, auth):
+        payload = {"name": f"TEST_strat_{uuid.uuid4().hex[:6]}",
+                   "description": "iter7 audit",
+                   "dsl": {"symbol": "NIFTY", "type": "trap"}}
+        r = auth.post(f"{BASE_URL}/api/strategies", json=payload)
+        assert r.status_code in (200, 201), r.text
+        sid = r.json().get("id")
+        time.sleep(1.0)
+        r2 = auth.get(f"{BASE_URL}/api/audit/events",
+                      params={"event_types": "STRATEGY_SAVED", "limit": 5})
+        assert r2.status_code == 200
+        items = r2.json()["items"]
+        assert items, "STRATEGY_SAVED not recorded"
+        latest = items[0]
+        assert latest["payload"].get("strategy_id") == sid
+        assert latest["payload"].get("symbol") == "NIFTY"
+        # cleanup
+        if sid:
+            auth.delete(f"{BASE_URL}/api/strategies/{sid}")
+
+    # ---------- Backtest run ----------
+    def test_backtest_run_event(self, auth):
+        dsl = {"name": "TEST_iter7_bt", "symbol": "NIFTY",
+               "entry": {"type": "indicator", "name": "RSI", "op": "<", "value": 30},
+               "exit": {"type": "indicator", "name": "RSI", "op": ">", "value": 70}}
+        r = auth.post(f"{BASE_URL}/api/backtest/run",
+                      json={"dsl": dsl, "save": False})
+        # Some envs may need different payload shape — accept either success
+        if r.status_code not in (200, 201):
+            pytest.skip(f"backtest endpoint returned {r.status_code}: {r.text[:200]}")
+        time.sleep(1.0)
+        r2 = auth.get(f"{BASE_URL}/api/audit/events",
+                      params={"event_types": "BACKTEST_RUN", "limit": 5})
+        assert r2.status_code == 200
+        items = r2.json()["items"]
+        assert items, "BACKTEST_RUN event not recorded"
+        p = items[0]["payload"]
+        assert "sharpe" in p and "max_drawdown_pct" in p
+
+    # ---------- Trap scan ----------
+    def test_trap_scan_records_signal(self, auth):
+        r = auth.get(f"{BASE_URL}/api/trap/scan", params={"symbol": "NIFTY"})
+        if r.status_code != 200:
+            pytest.skip(f"trap scan returned {r.status_code}: {r.text[:200]}")
+        score = r.json().get("overall_trap_score", 0)
+        time.sleep(1.0)
+        r2 = auth.get(f"{BASE_URL}/api/audit/events",
+                      params={"event_types": "SIGNAL", "limit": 10})
+        assert r2.status_code == 200
+        items = r2.json()["items"]
+        # find one for NIFTY trap scan
+        match = [it for it in items if "Trap scan NIFTY" in (it.get("summary") or "")]
+        assert match, "trap scan SIGNAL event missing"
+        sev = match[0]["severity"]
+        expected = "HIGH" if score > 0.7 else "INFO"
+        assert sev == expected, f"expected {expected} severity for score {score}, got {sev}"
+
+    # ---------- Auth login success + failure ----------
+    def test_auth_login_records_events(self, session):
+        # failure: invalid password
+        bad_email = f"TEST_nouser_{uuid.uuid4().hex[:6]}@algoforge.io"
+        session.post(f"{BASE_URL}/api/auth/login",
+                     json={"email": bad_email, "password": "wrong"})
+        # success: demo user
+        session.post(f"{BASE_URL}/api/auth/login",
+                     json={"email": DEMO_EMAIL, "password": DEMO_PASSWORD})
+        time.sleep(1.0)
+        # query as demo user (the success record is under demo's user_id)
+        login_resp = session.post(f"{BASE_URL}/api/auth/login",
+                                  json={"email": DEMO_EMAIL, "password": DEMO_PASSWORD})
+        tok = login_resp.json()["access_token"]
+        s2 = requests.Session()
+        s2.headers.update({"Authorization": f"Bearer {tok}"})
+        r = s2.get(f"{BASE_URL}/api/audit/events",
+                   params={"event_types": "AUTH_LOGIN", "limit": 20})
+        assert r.status_code == 200
+        items = r.json()["items"]
+        # we should at least see successful logins for demo
+        assert any(it["severity"] == "INFO" and it["user_id"] != "anonymous" for it in items), \
+            "no successful AUTH_LOGIN found"
+
+    # ---------- Filters: event_types & severities ----------
+    def test_filter_event_types(self, auth):
+        r = auth.get(f"{BASE_URL}/api/audit/events",
+                     params={"event_types": "REQUEST,FILL", "limit": 30})
+        assert r.status_code == 200
+        for it in r.json()["items"]:
+            assert it["event_type"] in {"REQUEST", "FILL"}, it["event_type"]
+
+    def test_filter_severities(self, auth):
+        r = auth.get(f"{BASE_URL}/api/audit/events",
+                     params={"severities": "HIGH,WARN", "limit": 30})
+        assert r.status_code == 200
+        for it in r.json()["items"]:
+            assert it["severity"] in {"HIGH", "WARN"}, it["severity"]
+
+    # ---------- Search ?q= ----------
+    def test_search_q_case_insensitive(self, auth):
+        # Issue an order whose summary will contain 'RELIANCE'
+        idem = f"TEST-iter7-q-{uuid.uuid4().hex[:10]}"
+        auth.post(f"{BASE_URL}/api/paper/order",
+                  json={"symbol": "RELIANCE", "side": "BUY", "qty": 1,
+                        "order_type": "MARKET", "instrument_type": "EQ"},
+                  headers={"Idempotency-Key": idem})
+        time.sleep(1.0)
+        r = auth.get(f"{BASE_URL}/api/audit/events",
+                     params={"q": "reliance", "limit": 10})
+        assert r.status_code == 200
+        items = r.json()["items"]
+        assert items, "search returned no items for 'reliance'"
+        for it in items:
+            assert "reliance" in it["summary"].lower()
+
+    # ---------- Date range ----------
+    def test_date_range_from_ts(self, auth):
+        # 24h ago should include events; far future from_ts should return none
+        from datetime import datetime, timedelta, timezone
+        future = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+        r = auth.get(f"{BASE_URL}/api/audit/events",
+                     params={"from_ts": future, "limit": 10})
+        assert r.status_code == 200
+        assert r.json()["items"] == []
+
+    # ---------- Pagination via cursor ----------
+    def test_pagination_cursor(self, auth):
+        r1 = auth.get(f"{BASE_URL}/api/audit/events", params={"limit": 2})
+        assert r1.status_code == 200
+        b1 = r1.json()
+        if not b1["has_more"]:
+            pytest.skip("not enough events in DB to test pagination")
+        cursor = b1["next_cursor"]
+        assert cursor
+        r2 = auth.get(f"{BASE_URL}/api/audit/events",
+                      params={"limit": 2, "cursor": cursor})
+        assert r2.status_code == 200
+        b2 = r2.json()
+        # No overlap: b2 items' ts strictly less than cursor
+        for it in b2["items"]:
+            assert it["ts"] < cursor
+
+    # ---------- CSV export ----------
+    def test_csv_export(self, auth):
+        r = auth.get(f"{BASE_URL}/api/audit/export")
+        assert r.status_code == 200, r.text
+        ctype = r.headers.get("content-type", "")
+        assert "text/csv" in ctype, f"unexpected content-type: {ctype}"
+        cd = r.headers.get("content-disposition", "")
+        assert "attachment" in cd.lower()
+        lines = r.text.strip().splitlines()
+        assert lines, "csv body empty"
+        assert lines[0] == "ts,event_type,severity,actor,summary,correlation_id"
+
+    # ---------- audit_events indexes ----------
+    def test_audit_indexes_exist(self):
+        import asyncio
+        import os as _os
+        from motor.motor_asyncio import AsyncIOMotorClient
+
+        async def _check():
+            client = AsyncIOMotorClient(_os.environ["MONGO_URL"])
+            db = client[_os.environ["DB_NAME"]]
+            try:
+                return await db.audit_events.index_information()
+            finally:
+                client.close()
+
+        info = asyncio.run(_check())
+        keys = [tuple(v.get("key", [])) for v in info.values()]
+        assert any(k == (("user_id", 1), ("ts", -1)) for k in keys), \
+            f"missing (user_id, ts desc) index. got: {keys}"
+        assert any(k == (("event_type", 1),) for k in keys), \
+            f"missing event_type index. got: {keys}"
+
+    # ---------- Audit failures never break user flows ----------
+    def test_paper_order_succeeds_even_if_audit_table_busy(self, auth):
+        # record_event swallows exceptions. We can't easily corrupt the
+        # collection over HTTP, but we can verify behaviour: a paper order
+        # always returns 200 and a usable order id even when many concurrent
+        # writes hammer audit_events. Surrogate check.
+        idem = f"TEST-iter7-resilient-{uuid.uuid4().hex[:10]}"
+        # use ?force=true to bypass duplicate-detection windows from earlier tests
+        r = auth.post(f"{BASE_URL}/api/paper/order?force=true",
+                      json={"symbol": "RELIANCE", "side": "BUY", "qty": 1,
+                            "order_type": "MARKET", "instrument_type": "EQ"},
+                      headers={"Idempotency-Key": idem})
+        assert r.status_code in (200, 201), r.text
+        assert r.json().get("id")

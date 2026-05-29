@@ -21,6 +21,7 @@ from starlette.middleware.cors import CORSMiddleware
 from auth import router as auth_router
 from db import close_db, get_db
 from routers import (
+    audit as audit_router,
     backtest as backtest_router,
     brokers as brokers_router,
     dashboard as dashboard_router,
@@ -33,6 +34,7 @@ from routers import (
     strategies as strategies_router,
     trap as trap_router,
 )
+from services.audit import _ensure_indexes as _audit_ensure_indexes
 from ws_feed import router as ws_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s — %(message)s")
@@ -43,7 +45,8 @@ logger = logging.getLogger("algoforge")
 async def lifespan(app: FastAPI):
     get_db()
     await paper_router._ensure_idempotency_ttl()
-    logger.info("AlgoForge backend started (modular routers, idempotency TTL ready)")
+    await _audit_ensure_indexes()
+    logger.info("AlgoForge backend started (modular routers, idempotency TTL ready, audit indexed)")
     yield
     close_db()
 
@@ -63,6 +66,7 @@ api.include_router(paper_router.router)
 api.include_router(journal_router.router)
 api.include_router(brokers_router.router)
 api.include_router(reconciliation_router.router)
+api.include_router(audit_router.router)
 api.include_router(dashboard_router.router)
 app.include_router(api)
 

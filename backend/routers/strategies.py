@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from ai_service import generate_strategy_from_nl
 from auth import get_current_user
 from db import get_db, now_iso
+from services.audit import AuditEventType, record_event
 
 router = APIRouter(prefix="/strategies", tags=["strategies"])
 
@@ -24,6 +25,9 @@ class StrategySaveRequest(BaseModel):
 @router.post("/generate")
 async def strategies_generate(req: StrategyGenRequest, user: dict = Depends(get_current_user)):
     dsl = await generate_strategy_from_nl(req.prompt)
+    await record_event(user["id"], AuditEventType.SIGNAL, actor="system",
+                       summary=f"AI strategy: {dsl.get('name', 'untitled')} on {dsl.get('symbol', '?')}",
+                       payload={"prompt": req.prompt[:200], "dsl_name": dsl.get("name")})
     return {"dsl": dsl}
 
 
@@ -53,6 +57,9 @@ async def save_strategy(req: StrategySaveRequest, user: dict = Depends(get_curre
         "updated_at": now_iso(),
     }
     await db.strategies.insert_one(doc)
+    await record_event(user["id"], AuditEventType.STRATEGY_SAVED, actor="user",
+                       summary=f"Saved strategy '{req.name}'",
+                       payload={"strategy_id": sid, "symbol": req.dsl.get("symbol")})
     return {"id": sid, "name": req.name, "dsl": req.dsl}
 
 

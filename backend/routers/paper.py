@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 from auth import get_current_user
 from db import get_db, now_iso
 from market_data import get_last_price, get_options_chain
+from services.audit import AuditEventType, AuditSeverity, record_event
 
 router = APIRouter(prefix="/paper", tags=["paper"])
 
@@ -230,6 +231,12 @@ async def place_paper_order(
     if check_duplicate:
         dup = await _check_duplicate(user["id"], req)
         if dup:
+            await record_event(
+                user["id"], AuditEventType.DUPLICATE_BLOCKED, severity=AuditSeverity.WARN,
+                actor="system",
+                summary=f"Duplicate {req.side} {req.qty} {req.symbol} blocked",
+                payload={"req": req.model_dump(), "dup_id": str(dup.get("_id"))},
+            )
             raise HTTPException(
                 409,
                 f"Duplicate order detected within {DUP_WINDOW_SECONDS}s. "
@@ -257,6 +264,19 @@ async def place_paper_order(
     await db.paper_orders.insert_one(order)
     order["id"] = oid
     order.pop("_id")
+    # SEBI trace: REQUEST → FILL on paper happens atomically
+    await record_event(
+        user["id"], AuditEventType.REQUEST, actor="user",
+        summary=f"{req.side} {req.qty} {req.symbol} ({req.instrument_type})",
+        payload={"req": req.model_dump(), "price": price},
+        correlation_id=oid,
+    )
+    await record_event(
+        user["id"], AuditEventType.FILL, actor="broker",
+        summary=f"FILLED {req.side} {req.qty} {req.symbol} @ {price:.2f}",
+        payload={"order_id": oid, "price": price, "qty": req.qty},
+        correlation_id=oid,
+    )
     return order
 
 
@@ -310,6 +330,13 @@ async def paper_order(
     if cached:
         return {**cached["response"], "idempotent_replay": True}
 
+    if force:
+        await record_event(
+            user["id"], AuditEventType.OVERRIDE, severity=AuditSeverity.HIGH,
+            actor="user",
+            summary=f"FORCE override on {req.side} {req.qty} {req.symbol}",
+            payload={"req": req.model_dump()},
+        )
     order = await place_paper_order(req, user, check_duplicate=not force)
     response = {**order, "idempotency_key": key}
     await _idem_store(user["id"], key, response)
@@ -384,6 +411,12 @@ async def paper_multi_leg(
                 await _undo_order(order, snapshot, user["id"])
             except Exception:
                 pass  # best-effort
+        await record_event(
+            user["id"], AuditEventType.BASKET_ROLLBACK, severity=AuditSeverity.HIGH,
+            actor="system",
+            summary=f"Basket '{req.name}' rolled back: {e}",
+            payload={"name": req.name, "legs": len(req.legs), "rolled_back": len(placed)},
+        )
         raise HTTPException(500, f"Basket rolled back due to leg failure: {e}") from e
 
     bid = str(uuid.uuid4())

@@ -10,6 +10,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, EmailStr, Field
 
 from db import BaseDocument, get_db, now_iso
+from services.audit import AuditEventType, AuditSeverity, record_event
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 security = HTTPBearer(auto_error=False)
@@ -126,6 +127,8 @@ async def register(req: RegisterRequest):
             "updated_at": now_iso(),
         }
     )
+    await record_event(user_id, AuditEventType.AUTH_REGISTER, actor="user",
+                       summary=f"Registered {req.email.lower()}")
     return TokenResponse(access_token=make_token(user_id, req.email.lower()), user=_public_user(doc))
 
 
@@ -134,7 +137,11 @@ async def login(req: LoginRequest):
     db = get_db()
     user = await db.users.find_one({"email": req.email.lower()})
     if not user or not verify_password(req.password, user["password_hash"]):
+        await record_event(None, AuditEventType.AUTH_LOGIN, severity=AuditSeverity.WARN,
+                           actor="user", summary=f"Failed login for {req.email.lower()}")
         raise HTTPException(status_code=401, detail="Invalid email or password")
+    await record_event(str(user["_id"]), AuditEventType.AUTH_LOGIN, actor="user",
+                       summary=f"Login {req.email.lower()}")
     return TokenResponse(
         access_token=make_token(str(user["_id"]), user["email"]),
         user=_public_user(user),

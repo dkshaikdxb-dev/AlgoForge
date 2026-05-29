@@ -10,6 +10,7 @@ import {
   LogOut,
   Zap,
   Plug,
+  ScrollText,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
@@ -22,6 +23,7 @@ const NAV = [
   { to: "/paper", label: "Paper Execution", icon: Activity, testid: "nav-paper" },
   { to: "/trap", label: "Trap Detection", icon: AlertTriangle, testid: "nav-trap" },
   { to: "/journal", label: "Journal", icon: BookOpen, testid: "nav-journal" },
+  { to: "/audit", label: "Audit Log", icon: ScrollText, testid: "nav-audit" },
   { to: "/brokers", label: "Brokers", icon: Plug, testid: "nav-brokers" },
   { to: "/settings", label: "Settings", icon: Settings, testid: "nav-settings" },
 ];

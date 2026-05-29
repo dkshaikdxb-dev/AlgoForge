@@ -10,6 +10,7 @@ from services.reconciliation import (
     get_reconciliation_summary,
     reconcile_orders,
 )
+from services.audit import AuditEventType, record_event
 
 router = APIRouter(prefix="/reconciliation", tags=["reconciliation"])
 
@@ -42,4 +43,9 @@ async def reconciliation_run(broker: str, user: dict = Depends(get_current_user)
     else:
         adapter = make_client(broker, creds)
         adapter.user_id = user["id"]  # tag for breaker key
-    return await reconcile_orders(adapter, user["id"])
+    result = await reconcile_orders(adapter, user["id"])
+    await record_event(user["id"], AuditEventType.RECONCILE, actor="system",
+                       summary=f"Reconcile {broker}: {result.get('state')}",
+                       payload={"broker": broker, "state": result.get("state"),
+                                "actions": len(result.get("actions", []))})
+    return result

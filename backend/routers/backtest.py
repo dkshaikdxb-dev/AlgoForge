@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from auth import get_current_user
 from backtest_engine import run_backtest
 from db import get_db, now_iso
+from services.audit import AuditEventType, record_event
 
 router = APIRouter(tags=["backtest"])
 logger = logging.getLogger("algoforge.backtest")
@@ -60,6 +61,16 @@ async def backtest_run(req: BacktestRequest, user: dict = Depends(get_current_us
             "created_at": now_iso(),
         })
         result["backtest_id"] = bid
+    await record_event(
+        user["id"], AuditEventType.BACKTEST_RUN, actor="user",
+        summary=f"Backtest {req.dsl.get('name', 'untitled')} on {result.get('symbol')} "
+                f"→ ret={result.get('total_return_pct')}%, sharpe={result.get('sharpe')}",
+        payload={
+            "symbol": result.get("symbol"),
+            "sharpe": result.get("sharpe"),
+            "max_drawdown_pct": result.get("max_drawdown_pct"),
+        },
+    )
     return result
 
 
