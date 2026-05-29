@@ -1,0 +1,37 @@
+{
+  "summary": "Iter 8 Monte Carlo Stress Tester — backend-only. Appended TestIter8MonteCarloStress (13 tests) to backend_test.py and verified the full regression suite. All 106 tests pass (93 prior + 13 new). Coverage: shape of /api/stress/run response (metrics percentiles, 20-bin histograms, worst-path), DSL-only path, seed reproducibility, pydantic clamping (422) for iterations 10/99999, service-level clamping (10→50, 99999→5000), short-equity-curve 400, missing backtest+dsl 400, malformed DSL 400, blowup-rate near 0% for tiny DDs, histogram bin contiguity (hi[i]==lo[i+1]), audit BACKTEST_RUN event with Monte Carlo summary + payload keys, and 401 auth-required.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/iter8_stress.xml",
+    "/app/test_reports/pytest/full_regression.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "services/stress.py uses `seed or random.randrange(...)` — if a caller intentionally passes seed=0, it falls through to a random seed (zero is falsy). Minor; spec tests pass with non-zero seeds, but consider `seed if seed is not None else random.randrange(...)` for correctness.",
+    "stress.py histogram edges are stored as rounded floats (round(_,4)); contiguity tolerance must allow ≤1e-3 due to rounding. Acceptable but worth documenting.",
+    "routers/stress.py catches (KeyError, ValueError, TypeError, AttributeError) when running DSL — consistent with prior backtest router pattern. Good.",
+    "Pydantic Field(ge=50, le=5000) on iterations returns 422 (FastAPI validation), while the service-level run_monte_carlo separately clamps. Two different behaviors at two layers — fine but documented divergence."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py"
+  ],
+  "success_rate": {
+    "backend": "106/106 = 100% (13 new iter8 + 93 prior)",
+    "frontend": "not tested (backend-only per request)"
+  },
+  "test_credentials": "demo@algoforge.io / Demo@123 (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "None — tests use seed=42/7/11/etc for deterministic Monte Carlo runs; backtest fixture is computed at runtime with TEST_-prefixed DSL names.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter 8 stress router lives at /api/stress/run (POST, auth required). Service is /app/backend/services/stress.py. To run full regression locally: `cd /app/backend && set -a && source .env && set +a && python -m pytest tests/backend_test.py` — loading .env is required for tests that import brokers/* (ENCRYPTION_KEY) and motor (MONGO_URL). Running from /app without sourcing .env causes 7 spurious env-related failures (not regressions). Iter 8 tests are network-only and don't need this; they passed cleanly even without sourced env.",
+  "rca of the issue": "N/A — all tests pass. Note: when pytest is invoked from /app/ without loading /app/backend/.env, the in-process tests (TestIter6 brokers tests + TestIter7 test_audit_indexes_exist) raise because ENCRYPTION_KEY and MONGO_URL are not in os.environ for direct module imports. Network-based tests are unaffected. This is a pre-existing test-runner concern, not an iter-8 regression."
+}

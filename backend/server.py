@@ -32,6 +32,7 @@ from routers import (
     reconciliation as reconciliation_router,
     risk as risk_router,
     strategies as strategies_router,
+    stress as stress_router,
     trap as trap_router,
 )
 from services.audit import _ensure_indexes as _audit_ensure_indexes
@@ -60,6 +61,7 @@ api.include_router(auth_router)
 api.include_router(market_router.router)
 api.include_router(strategies_router.router)
 api.include_router(backtest_router.router)
+api.include_router(stress_router.router)
 api.include_router(risk_router.router)
 api.include_router(trap_router.router)
 api.include_router(paper_router.router)

@@ -1568,3 +1568,219 @@ class TestIter7AuditLog:
                       headers={"Idempotency-Key": idem})
         assert r.status_code in (200, 201), r.text
         assert r.json().get("id")
+
+
+# ===================================================================
+# Iter 8 — Monte Carlo Stress Tester
+# ===================================================================
+class TestIter8MonteCarloStress:
+    """Tests for POST /api/stress/run + run_monte_carlo service."""
+
+    @pytest.fixture(scope="class")
+    def backtest_result(self, auth):
+        """Run a real backtest to feed into stress runs."""
+        dsl = {
+            "name": "TEST_iter8_stress_base",
+            "symbol": "TCS",
+            "timeframe": "1d",
+            "indicators": [
+                {"id": "fast", "type": "sma", "period": 5, "source": "close"},
+                {"id": "slow", "type": "sma", "period": 20, "source": "close"},
+            ],
+            "entry": {"op": "and",
+                      "rules": [{"left": "fast", "cmp": ">", "right": "slow"}]},
+            "exit": {"op": "or",
+                     "rules": [{"left": "fast", "cmp": "<", "right": "slow"}]},
+            "size": {"type": "fixed_qty", "value": 5},
+        }
+        r = auth.post(f"{BASE_URL}/api/backtest/run",
+                      json={"dsl": dsl, "days": 250, "save": False})
+        if r.status_code != 200:
+            pytest.skip(f"baseline backtest failed: {r.status_code} {r.text[:200]}")
+        return r.json()
+
+    # ---- 1) stress with pre-computed backtest returns proper shape ----
+    def test_stress_with_backtest_full_shape(self, auth, backtest_result):
+        r = auth.post(f"{BASE_URL}/api/stress/run",
+                      json={"backtest": backtest_result, "iterations": 100, "seed": 7})
+        assert r.status_code == 200, r.text
+        d = r.json()
+        for k in ("iterations", "block_size", "slippage_jitter_bps",
+                  "bars_per_path", "capital", "metrics", "histograms",
+                  "blowup_rate_pct", "blowup_threshold_pct", "worst_path"):
+            assert k in d, f"missing top-level key {k}"
+        assert d["iterations"] == 100
+        assert d["block_size"] == 5
+        # bars_per_path should be len(equity_curve)-1
+        assert d["bars_per_path"] == len(backtest_result["equity_curve"]) - 1
+        # metrics — each with all percentiles + mean/std/min/max
+        for mkey in ("final_equity", "max_drawdown_pct", "sharpe",
+                     "sortino", "total_return_pct"):
+            m = d["metrics"][mkey]
+            for stat in ("p5", "p25", "p50", "p75", "p95", "mean", "std", "min", "max"):
+                assert stat in m, f"missing {stat} in metrics.{mkey}"
+        # histograms — 20 bins each, fields lo/hi/mid/count
+        for hkey in ("max_drawdown_pct", "sharpe", "total_return_pct"):
+            hist = d["histograms"][hkey]
+            assert len(hist) == 20, f"{hkey} has {len(hist)} bins"
+            for b in hist:
+                for f in ("lo", "hi", "mid", "count"):
+                    assert f in b
+        # worst-path shape
+        assert "max_drawdown_pct" in d["worst_path"]
+        assert isinstance(d["worst_path"]["equity_curve"], list)
+        assert len(d["worst_path"]["equity_curve"]) > 0
+        assert d["blowup_threshold_pct"] == -25.0
+
+    # ---- 2) stress with DSL only runs internal backtest, same shape ----
+    def test_stress_with_dsl_only(self, auth):
+        dsl = {
+            "name": "TEST_iter8_dsl_only",
+            "symbol": "TCS", "timeframe": "1d",
+            "indicators": [
+                {"id": "fast", "type": "sma", "period": 5, "source": "close"},
+                {"id": "slow", "type": "sma", "period": 20, "source": "close"},
+            ],
+            "entry": {"op": "and",
+                      "rules": [{"left": "fast", "cmp": ">", "right": "slow"}]},
+            "exit": {"op": "or",
+                     "rules": [{"left": "fast", "cmp": "<", "right": "slow"}]},
+            "size": {"type": "fixed_qty", "value": 5},
+        }
+        r = auth.post(f"{BASE_URL}/api/stress/run",
+                      json={"dsl": dsl, "days": 200, "iterations": 60, "seed": 11})
+        assert r.status_code == 200, r.text
+        d = r.json()
+        for k in ("iterations", "metrics", "histograms", "worst_path",
+                  "blowup_rate_pct", "bars_per_path"):
+            assert k in d
+
+    # ---- 3) reproducibility: same seed → identical metrics ----
+    def test_same_seed_reproducible(self, auth, backtest_result):
+        payload = {"backtest": backtest_result, "iterations": 100, "seed": 42}
+        r1 = auth.post(f"{BASE_URL}/api/stress/run", json=payload)
+        r2 = auth.post(f"{BASE_URL}/api/stress/run", json=payload)
+        assert r1.status_code == 200 and r2.status_code == 200
+        assert r1.json()["metrics"] == r2.json()["metrics"], \
+            "metrics differ for same seed"
+
+    # ---- 4) iterations clamping via pydantic Field → 422 for out-of-range ----
+    def test_iterations_below_min_returns_422(self, auth, backtest_result):
+        r = auth.post(f"{BASE_URL}/api/stress/run",
+                      json={"backtest": backtest_result, "iterations": 10})
+        assert r.status_code == 422, r.text
+
+    def test_iterations_above_max_returns_422(self, auth, backtest_result):
+        r = auth.post(f"{BASE_URL}/api/stress/run",
+                      json={"backtest": backtest_result, "iterations": 99999})
+        assert r.status_code == 422, r.text
+
+    def test_service_level_iterations_clamped(self):
+        """Direct service call: 10 → 50, 99999 → 5000."""
+        import sys
+        sys.path.insert(0, "/app/backend")
+        from services.stress import run_monte_carlo
+        eq = [{"step": i, "equity": 100000 * (1 + 0.001 * ((-1) ** i))}
+              for i in range(60)]
+        bt = {"equity_curve": eq, "capital": 100000}
+        low = run_monte_carlo(bt, iterations=10, seed=1)
+        high = run_monte_carlo(bt, iterations=99999, seed=1)
+        assert low["iterations"] == 50
+        assert high["iterations"] == 5000
+
+    # ---- 5) empty / short equity curve → 400 ----
+    def test_short_equity_curve_returns_400(self, auth):
+        bt = {"equity_curve": [{"step": 0, "equity": 100000}], "capital": 100000}
+        r = auth.post(f"{BASE_URL}/api/stress/run",
+                      json={"backtest": bt, "iterations": 100})
+        assert r.status_code == 400
+        assert "Not enough data" in r.text
+
+    # ---- 6) neither backtest nor dsl → 400 ----
+    def test_neither_backtest_nor_dsl_returns_400(self, auth):
+        r = auth.post(f"{BASE_URL}/api/stress/run", json={"iterations": 100})
+        assert r.status_code == 400
+        assert "backtest" in r.text.lower() and "dsl" in r.text.lower()
+
+    # ---- 7) malformed DSL → 400 ----
+    def test_malformed_dsl_returns_400(self, auth):
+        # entry as a string triggers AttributeError inside the engine, which
+        # the router catches and re-raises as 400 'Invalid strategy DSL: ...'.
+        bad_dsl = {
+            "name": "TEST_iter8_bad_dsl",
+            "symbol": "RELIANCE",
+            "timeframe": "1d",
+            "indicators": [],
+            "entry": "BAD",
+            "exit": {},
+            "size": {"type": "fixed_qty", "value": 1},
+        }
+        r = auth.post(f"{BASE_URL}/api/stress/run",
+                      json={"dsl": bad_dsl, "iterations": 60})
+        assert r.status_code == 400, r.text
+        assert "Invalid strategy DSL" in r.json().get("detail", ""), \
+            f"detail: {r.json().get('detail')!r}"
+
+    # ---- 8) low-DD distribution → blowup_rate near 0 ----
+    def test_blowup_rate_near_zero_for_small_dd(self, auth):
+        """Curve with tiny oscillations → all DD shallow → blowup near 0%."""
+        # gentle alternating +0.05% / -0.05% — DD will be tiny
+        eq = [{"step": 0, "equity": 100000.0}]
+        val = 100000.0
+        for i in range(1, 80):
+            val *= (1 + (0.0005 if i % 2 == 0 else -0.0005))
+            eq.append({"step": i, "equity": val})
+        bt = {"equity_curve": eq, "capital": 100000.0}
+        r = auth.post(f"{BASE_URL}/api/stress/run",
+                      json={"backtest": bt, "iterations": 100,
+                            "slippage_jitter_bps": 0.5, "seed": 99})
+        assert r.status_code == 200, r.text
+        d = r.json()
+        # p5 drawdown should be small (>-2% typically); blowup_rate must be ~0
+        assert d["blowup_rate_pct"] <= 1.0, \
+            f"blowup_rate={d['blowup_rate_pct']} for tiny DDs"
+
+    # ---- 9) histogram bins contiguous: hi[i] == lo[i+1] ----
+    def test_histograms_bins_contiguous(self, auth, backtest_result):
+        r = auth.post(f"{BASE_URL}/api/stress/run",
+                      json={"backtest": backtest_result, "iterations": 60, "seed": 5})
+        assert r.status_code == 200
+        d = r.json()
+        for hkey in ("max_drawdown_pct", "sharpe", "total_return_pct"):
+            hist = d["histograms"][hkey]
+            for i in range(len(hist) - 1):
+                assert abs(hist[i]["hi"] - hist[i + 1]["lo"]) < 1e-3, \
+                    f"{hkey} bin {i} not contiguous: {hist[i]['hi']} vs {hist[i+1]['lo']}"
+
+    # ---- 10) audit event recorded after stress run ----
+    def test_stress_audit_event_recorded(self, auth, backtest_result):
+        before = auth.get(f"{BASE_URL}/api/audit/events",
+                          params={"event_types": "BACKTEST_RUN", "limit": 1})
+        prev_ts = before.json()["items"][0]["ts"] if before.status_code == 200 \
+            and before.json()["items"] else None
+
+        r = auth.post(f"{BASE_URL}/api/stress/run",
+                      json={"backtest": backtest_result, "iterations": 80, "seed": 17})
+        assert r.status_code == 200
+        time.sleep(1.0)
+
+        ev = auth.get(f"{BASE_URL}/api/audit/events",
+                      params={"event_types": "BACKTEST_RUN", "limit": 10})
+        assert ev.status_code == 200
+        items = ev.json()["items"]
+        # Find the Monte Carlo event
+        mc_event = next((it for it in items
+                         if it.get("summary", "").startswith("Monte Carlo")), None)
+        assert mc_event, f"No Monte Carlo audit event found in {items[:2]}"
+        p = mc_event["payload"]
+        for k in ("iterations", "blowup_rate_pct", "p5_drawdown", "p95_return"):
+            assert k in p, f"audit payload missing {k}"
+        # ensure it's fresher than what we had before
+        if prev_ts:
+            assert mc_event["ts"] >= prev_ts
+
+    # ---- 11) Auth required ----
+    def test_stress_no_auth_returns_401(self, session, backtest_result):
+        r = session.post(f"{BASE_URL}/api/stress/run",
+                         json={"backtest": backtest_result, "iterations": 60})
+        assert r.status_code in (401, 403)

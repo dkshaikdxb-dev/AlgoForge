@@ -12,8 +12,8 @@ import {
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
-import { Loader2, Play, ShieldCheck } from "lucide-react";
-import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
+import { Loader2, Play, ShieldCheck, Activity } from "lucide-react";
+import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, BarChart, Bar, LineChart, Line, ReferenceLine } from "recharts";
 import { toast } from "sonner";
 
 const fmt = (n, d = 2) =>
@@ -30,6 +30,9 @@ export default function Backtest() {
   const [result, setResult] = useState(null);
   const [risk, setRisk] = useState(null);
   const [riskLoading, setRiskLoading] = useState(false);
+  const [stress, setStress] = useState(null);
+  const [stressLoading, setStressLoading] = useState(false);
+  const [stressIter, setStressIter] = useState(1000);
 
   useEffect(() => {
     api.get("/strategies").then(({ data }) => {
@@ -63,6 +66,7 @@ export default function Backtest() {
     setLoading(true);
     setResult(null);
     setRisk(null);
+    setStress(null);
     try {
       const { data } = await api.post("/backtest/run", {
         dsl: selected.dsl,
@@ -95,6 +99,23 @@ export default function Backtest() {
       toast.error("Risk analysis failed");
     } finally {
       setRiskLoading(false);
+    }
+  };
+
+  const stressTest = async () => {
+    if (!result) return;
+    setStressLoading(true);
+    try {
+      const { data } = await api.post("/stress/run", {
+        backtest: result,
+        iterations: Number(stressIter),
+      });
+      setStress(data);
+      toast.success(`Monte Carlo × ${data.iterations} done — blowup ${data.blowup_rate_pct}%`);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Stress test failed");
+    } finally {
+      setStressLoading(false);
     }
   };
 
@@ -163,6 +184,18 @@ export default function Backtest() {
               >
                 {riskLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <ShieldCheck className="w-4 h-4 mr-2" />}
                 {riskLoading ? "ANALYSING…" : "AI RISK REVIEW"}
+              </Button>
+            )}
+            {result && (
+              <Button
+                data-testid="backtest-stress-btn"
+                onClick={stressTest}
+                disabled={stressLoading}
+                variant="outline"
+                className="rounded-none border-amber-500 text-amber-400 hover:bg-amber-500 hover:text-black h-10 font-section tracking-wider"
+              >
+                {stressLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Activity className="w-4 h-4 mr-2" />}
+                {stressLoading ? `STRESSING × ${stressIter}…` : `MONTE CARLO × ${stressIter}`}
               </Button>
             )}
           </div>
@@ -289,6 +322,104 @@ export default function Backtest() {
                 )}
               </div>
             </div>
+
+            {/* Monte Carlo stress test */}
+            {stress && (
+              <div className="panel p-5 space-y-6" data-testid="stress-results">
+                <div className="flex items-center justify-between flex-wrap gap-3">
+                  <div>
+                    <div className="overline">Monte Carlo Stress Test</div>
+                    <div className="font-display text-3xl mt-1">
+                      Blow-up rate{" "}
+                      <span className={stress.blowup_rate_pct > 5 ? "txt-loss" : stress.blowup_rate_pct > 1 ? "txt-warn" : "txt-profit"}>
+                        {stress.blowup_rate_pct}%
+                      </span>
+                    </div>
+                    <div className="text-xs txt-muted font-mono-data mt-1">
+                      {stress.iterations} paths · block_size {stress.block_size} · slippage jitter ±{stress.slippage_jitter_bps}bps · {stress.bars_per_path} bars/path · DD &lt; {stress.blowup_threshold_pct}% counts as blow-up
+                    </div>
+                  </div>
+                </div>
+
+                {/* Percentile cards */}
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                  {[
+                    { k: "total_return_pct", label: "Return %", suffix: "%" },
+                    { k: "max_drawdown_pct", label: "Max DD %", suffix: "%", tone: "loss" },
+                    { k: "sharpe", label: "Sharpe", suffix: "" },
+                    { k: "sortino", label: "Sortino", suffix: "" },
+                    { k: "final_equity", label: "Final ₹", suffix: "", fmtFn: (v) => fmt(v, 0) },
+                  ].map(({ k, label, suffix, tone, fmtFn }) => {
+                    const m = stress.metrics[k];
+                    const fv = fmtFn || ((v) => fmt(v));
+                    return (
+                      <div key={k} className="panel panel-hover p-4">
+                        <div className="overline">{label}</div>
+                        <div className="font-mono-data text-xs mt-3 space-y-1">
+                          <div className="flex justify-between"><span className="txt-muted">P5</span><span className={tone === "loss" ? "txt-loss" : ""}>{fv(m.p5)}{suffix}</span></div>
+                          <div className="flex justify-between"><span className="txt-muted">P50</span><span className="text-white">{fv(m.p50)}{suffix}</span></div>
+                          <div className="flex justify-between"><span className="txt-muted">P95</span><span>{fv(m.p95)}{suffix}</span></div>
+                          <div className="flex justify-between border-t border-[var(--border)] pt-1 mt-1">
+                            <span className="txt-muted">μ ± σ</span>
+                            <span>{fv(m.mean)}±{fv(m.std)}</span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Distributions */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {[
+                    { k: "max_drawdown_pct", title: "Drawdown distribution", color: "#ef4444" },
+                    { k: "total_return_pct", title: "Return distribution", color: "#10b981" },
+                  ].map(({ k, title, color }) => (
+                    <div key={k} className="border border-[var(--border)] p-3">
+                      <div className="overline mb-2">{title}</div>
+                      <div className="h-44">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart data={stress.histograms[k]}>
+                            <CartesianGrid stroke="#27272a" strokeDasharray="2 4" vertical={false} />
+                            <XAxis dataKey="mid" stroke="#52525b" fontSize={10} tickFormatter={(v) => fmt(v, 1)} />
+                            <YAxis stroke="#52525b" fontSize={10} />
+                            <Tooltip
+                              contentStyle={{ background: "#18181b", border: "1px solid #27272a", borderRadius: 0, fontFamily: "JetBrains Mono" }}
+                              formatter={(v) => v + " paths"}
+                              labelFormatter={(v) => `≈ ${fmt(v, 2)}`}
+                            />
+                            <Bar dataKey="count" fill={color} />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Worst path */}
+                <div className="border border-[var(--border)] p-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="overline">Worst path (max DD {stress.worst_path.max_drawdown_pct}%)</div>
+                    <div className="font-mono-data text-xs txt-muted">{stress.worst_path.equity_curve.length} bars</div>
+                  </div>
+                  <div className="h-48">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={stress.worst_path.equity_curve}>
+                        <CartesianGrid stroke="#27272a" strokeDasharray="2 4" vertical={false} />
+                        <XAxis dataKey="step" stroke="#52525b" fontSize={10} />
+                        <YAxis stroke="#52525b" fontSize={10} tickFormatter={(v) => Math.round(v / 1000) + "k"} />
+                        <Tooltip
+                          contentStyle={{ background: "#18181b", border: "1px solid #27272a", borderRadius: 0, fontFamily: "JetBrains Mono" }}
+                          formatter={(v) => `₹${fmt(v, 0)}`}
+                        />
+                        <ReferenceLine y={stress.capital} stroke="#52525b" strokeDasharray="2 4" />
+                        <Line type="monotone" dataKey="equity" stroke="#ef4444" strokeWidth={1.5} dot={false} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              </div>
+            )}
           </>
         )}
       </div>
