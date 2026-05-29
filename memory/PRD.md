@@ -49,3 +49,12 @@ Build a modular & scalable AI-first hybrid algorithmic trading platform with: da
 1. Plug in real broker SDKs once API keys are provided.
 2. Real-time WebSocket for paper P&L tick updates.
 3. Build the "compare backtests" view (saved backtests already persist).
+
+## Iteration 2 (2026-02-29) — P0 partial
+- **Broker scaffold**: Encrypted Fernet vault (`/api/brokers/*`) for Zerodha Kite, Upstox v2, Dhan, ICICI Direct Breeze, Rmoney. Each adapter lazy-imports the SDK and raises `BrokerUnavailable` (graceful 200 status='error') when keys/SDK absent. UI page `/brokers` with Connect/Test/Disconnect.
+- **Live WebSocket tick feed**: `/api/ws/ticks?symbols=...` pushes simulated ticks ~750ms. `TickerBar` mounted in `AppShell` so every page shows the 6-symbol live strip.
+- **Multi-leg builder**: `MultiLegBuilder` component on /paper with presets (Long/Short Straddle, Long Strangle, Iron Condor, Bull Call Spread, Bear Put Spread) + custom legs. Backend `/api/paper/order/multi-leg` fills atomically (caveat: no rollback on partial leg failure — documented).
+
+## Remaining P0
+- Real Zerodha/Upstox/Dhan/ICICI/Rmoney **live** wiring (awaiting API keys + KYC + SDK installs).
+- WS upgrade from mock to real broker tick streams once any broker is live.
