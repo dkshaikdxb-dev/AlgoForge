@@ -128,3 +128,27 @@ Build a modular & scalable AI-first hybrid algorithmic trading platform with: da
 - **Code-review fix applied**: `seed=0` now respected (previously fell through to random due to truthiness).
 - **Hotfix**: Brokers page crashed with `ReferenceError: Check is not defined` after a prior import edit silently no-op'd. Re-applied the import; page now renders capability chips correctly. Root cause was a stale `search_replace` no-op match — file content drifted between the edit and verification.
 - **Tests**: 106/106 backend pass (13 new TestIter8MonteCarloStress + 93 regression).
+
+## Iteration 9 (2026-02-29) — Final P0 + P1 Backlog Completion
+
+### P1: `services/paper_trading.py`
+- Moved all paper-order business logic out of `routers/paper.py` into `services/paper_trading.py`.
+- Router is now a thin HTTP layer. `brokers/paper_adapter.py` and `routers/dashboard.py` both consume the service directly (no nested HTTP calls).
+- Kwargs renamed `check_duplicate` → `do_check_duplicate`, `check_kill_switch` → `do_check_kill_switch` to disambiguate from same-named helper functions.
+
+### P0: Live broker wiring (Zerodha + Upstox)
+- `pip install kiteconnect==5.2.0 upstox-python-sdk==2.27.0` and pinned in requirements.txt.
+- `brokers/zerodha.py` + `brokers/upstox.py` REWRITTEN to inherit `BrokerAdapter` ABC. All 6 contract methods (test_connection, place_order, cancel_order, modify_order, get_orders, get_positions) translate to/from `NormalizedOrder` / `NormalizedOrderRequest`. Status mapping helpers (`_kite_status_to_normalized`, `_upstox_status_to_normalized`) keep platform-side enums consistent. Errors classified into `BrokerAuthError` (bad creds) / `BrokerOrderRejected` (broker said no) / `BrokerUnavailable` (SDK or config missing).
+- **Reconciler background loop**: `services/reconciler_loop.py` launched on FastAPI lifespan as an asyncio Task. Polls every 30s for `broker_connections.status='live'`, calls `reconcile_orders` per broker. Cancelled on shutdown. Idle when no live brokers (returns 0).
+- **Duplicate `BrokerUnavailable` consolidated**: `brokers/__init__.py` now re-exports the canonical class from `brokers/base.py` (`A is B == True`).
+- `routers/brokers.py.broker_test()` now awaits async `test_connection()` and catches `BrokerError` parent (covers `BrokerAuthError`/`BrokerOrderRejected`/`BrokerUnavailable`).
+
+### Status
+- **Tests**: 118/118 backend pytest pass. Test agent found+fixed 2 refactor bugs (broker_test awaiting + paper_adapter kwarg rename) inline.
+- **Live trading is one config away** — connect real Kite/Upstox keys via `/brokers` UI, broker_test will return `status='live'`, reconciler will then start ticking it.
+
+### Backlog cleared. Future enhancements (open-ended)
+- Telegram alerts for HIGH-severity audit events.
+- Live broker WebSocket order-update streams (Zerodha postbacks / Upstox WS) — wiring path: implement `stream_order_updates()` on each adapter, replace the 30s poll with WS push.
+- Migrate ICICI/Dhan/Rmoney legacy adapters to `BrokerAdapter` ABC (Zerodha/Upstox set the template).
+- Strategy marketplace + plugin SDK + cross-asset (crypto, FX) + DeFi (long horizon).

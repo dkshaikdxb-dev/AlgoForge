@@ -26,7 +26,18 @@ def decrypt_credentials(token: str) -> dict:
 
 
 class BrokerUnavailable(Exception):
-    """Raised when a broker cannot be used (no keys, SDK missing, network)."""
+    """DEPRECATED legacy shim. Use brokers.base.BrokerUnavailable instead.
+
+    Kept ONLY so older imports `from brokers import BrokerUnavailable` still
+    work; this class is re-assigned below to the canonical one in
+    `brokers.base` so `isinstance(e, brokers.base.BrokerUnavailable)` and
+    `isinstance(e, brokers.BrokerUnavailable)` evaluate identically.
+    """
+    pass
+
+
+# Re-export the canonical class so both imports resolve to the same object.
+from .base import BrokerUnavailable as BrokerUnavailable  # noqa: F811,E402
 
 
 @dataclass
