@@ -57,8 +57,11 @@ async def audit_export(
         to_ts=to_ts,
         correlation_id=correlation_id,
     )
+    from datetime import date
+
+    fname = f"algoforge-audit-{date.today().isoformat()}.csv"
     return PlainTextResponse(
         csv_text,
         media_type="text/csv",
-        headers={"Content-Disposition": "attachment; filename=algoforge-audit.csv"},
+        headers={"Content-Disposition": f"attachment; filename={fname}"},
     )

@@ -11,6 +11,7 @@ Hooks call `record_event()` fire-and-forget — failures never break user flows.
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 from enum import Enum
@@ -110,34 +111,56 @@ async def query_events(
     to_ts: str | None = None,
     correlation_id: str | None = None,
     limit: int = 100,
-    cursor: str | None = None,  # ts cursor for pagination
+    cursor: str | None = None,  # compound cursor "<ts>|<id>" for burst stability
 ) -> dict:
     db = get_db()
     query: dict[str, Any] = {"user_id": user_id}
+
+    # Whitelist event types against the enum to fail-fast on typos.
     if event_types:
-        query["event_type"] = {"$in": event_types}
+        valid = {t.value for t in AuditEventType}
+        cleaned = [t for t in event_types if t in valid]
+        if cleaned:
+            query["event_type"] = {"$in": cleaned}
     if severities:
         query["severity"] = {"$in": severities}
     if correlation_id:
         query["correlation_id"] = correlation_id
-    if from_ts or to_ts or cursor:
+
+    if from_ts or to_ts:
         ts_q: dict[str, Any] = {}
         if from_ts:
             ts_q["$gte"] = from_ts
         if to_ts:
             ts_q["$lte"] = to_ts
-        if cursor:
-            ts_q["$lt"] = cursor
         query["ts"] = ts_q
-    if q:
-        query["summary"] = {"$regex": q, "$options": "i"}
 
-    docs = await db.audit_events.find(query).sort("ts", -1).limit(limit + 1).to_list(limit + 1)
+    # Compound cursor: format "<ts>|<id>" — survives same-ms event bursts.
+    if cursor:
+        if "|" in cursor:
+            cur_ts, cur_id = cursor.split("|", 1)
+            query["$or"] = [
+                {"ts": {"$lt": cur_ts}},
+                {"ts": cur_ts, "_id": {"$lt": cur_id}},
+            ]
+        else:
+            query.setdefault("ts", {})["$lt"] = cursor
+
+    if q:
+        # Escape user input before passing to $regex.
+        query["summary"] = {"$regex": re.escape(q), "$options": "i"}
+
+    docs = (
+        await db.audit_events.find(query)
+        .sort([("ts", -1), ("_id", -1)])
+        .limit(limit + 1)
+        .to_list(limit + 1)
+    )
     has_more = len(docs) > limit
     docs = docs[:limit]
     for d in docs:
         d["id"] = str(d.pop("_id"))
-    next_cursor = docs[-1]["ts"] if has_more and docs else None
+    next_cursor = f"{docs[-1]['ts']}|{docs[-1]['id']}" if has_more and docs else None
     return {"items": docs, "next_cursor": next_cursor, "has_more": has_more}
 
 

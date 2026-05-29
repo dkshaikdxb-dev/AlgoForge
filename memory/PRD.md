@@ -108,3 +108,15 @@ Build a modular & scalable AI-first hybrid algorithmic trading platform with: da
 ## Remaining
 - **P0**: Live broker wiring (Kite + Upstox) — blocked on user keys. When they arrive: pip-install SDKs, migrate `zerodha.py`/`upstox.py` to inherit `BrokerAdapter`, populate `live_orders` collection, kick off reconciler.
 - **P1**: Audit-log viewer (SEBI trace) · Monte Carlo stress tester · move paper logic to `services/`.
+
+## Iteration 7 (2026-02-29) — SEBI Audit-Log Viewer (P1)
+- **`services/audit.py`**: append-only `record_event()` helper, 18 typed event types covering the SEBI 6-step trace (SIGNAL→DECISION→REQUEST→RESPONSE→FILL→OVERRIDE) plus ops (AUTH_LOGIN, AUTH_REGISTER, KILL_SWITCH, RISK_POLICY_CHANGE, BROKER_CONNECT/TEST/DISCONNECT, RECONCILE, STRATEGY_SAVED, BACKTEST_RUN, DUPLICATE_BLOCKED, BASKET_ROLLBACK).
+- **Instrumentation hooks** in 7 routers — paper emits REQUEST + FILL sharing `correlation_id=order_id`; OVERRIDE for `?force=true`; risk policy diffs payload; broker lifecycle; trap scan signal severity scales with overall_trap_score.
+- **Endpoints**: `GET /api/audit/types`, `GET /api/audit/events` (filterable by event_types/severities/q/from_ts/to_ts/correlation_id + compound cursor pagination), `GET /api/audit/export` (CSV with date-stamped filename).
+- **Hardening from test-agent code review applied**:
+  - `q` regex search uses `re.escape()` to prevent regex injection / DoS.
+  - Cursor pagination switched to compound `<ts>|<id>` to survive same-ms event bursts (multi-leg basket emits 2N events ms-apart).
+  - Unknown `event_type` filter values silently dropped (whitelist against enum).
+  - Export filename includes ISO date.
+- **Frontend**: new `/audit` page with overline-styled filter chips, search/date inputs, SEBI 6-step toggle, paginated event timeline, CSV download. Sidebar nav entry under Journal.
+- **Tests**: 93/93 backend pass (22 new TestIter7AuditLog + 71 regression). Lint clean both stacks.
