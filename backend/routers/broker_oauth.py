@@ -351,7 +351,7 @@ async def broker_postback(name: str, request: Request, token: str | None = None)
         "ts": now_iso(),
         "user_id": user_id,
         "broker": name,
-        "payload": payload,
+        "payload": payload if len(str(payload)) < 8000 else {"truncated": True, "preview": str(payload)[:8000]},
         "broker_order_id": payload.get("order_id") or payload.get("orderId"),
         "status": payload.get("status") or payload.get("orderStatus"),
     })

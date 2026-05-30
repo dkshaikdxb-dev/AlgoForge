@@ -172,11 +172,23 @@ User choice: 1a platform super-admin · 2 global audit + system health + risk ov
 ### Backlog cleared. Future enhancements (open-ended)
 - **P2**: JWT to httpOnly cookies + CSRF middleware.
 - **P2**: Backtest.jsx / PaperExecution.jsx complexity refactor.
-- **P2**: Live broker WebSocket order-update streams (Zerodha postbacks / Upstox WS) — replace 30s reconciler poll.
 - **P2**: When wiring production Dhan/ICICI: wrap their synchronous SDK calls in `await asyncio.to_thread(...)` so the event loop isn't blocked.
 - **P2**: RL intraday scalper, voice trading, crypto/FX/DeFi expansion (open-ended).
 - **P2**: Move alerts dedup from in-process OrderedDict to Mongo TTL collection if scaling out to multiple uvicorn workers.
+- **P2**: Kite OAuth callback could match on user_id (currently falls back to most-recent-pending row globally) — re-introduce state via Kite Connect "redirect_params" once a real Kite app is provisioned.
 - **Test-infra**: backend_test.py TestIter9Refactor needs conftest.py loading .env before brokers package imports.
+
+## Iteration 13 (2026-02-29) — Broker OAuth Wizard (Zerodha + Upstox)
+
+- **`routers/broker_oauth.py`**: 4 endpoints — `GET /brokers/{name}/oauth/urls` (surfaces redirect_url + postback_url), `POST /brokers/{name}/oauth/start` (returns broker login_url, stashes state in TTL collection), `GET /brokers/{name}/oauth/callback` (exchanges request_token/code via `KiteConnect.generate_session` / Upstox `/v2/login/authorization/token`, persists access_token encrypted, marks LIVE, audit-logs, returns auto-close HTML), `POST /brokers/{name}/postback` (per-connection token, writes to `live_order_events`, audit-logs REJECTED as HIGH severity).
+- **Public URL derivation**: `_base_url` honours `x-forwarded-proto` / `x-forwarded-host` so the URLs surfaced to the user resolve to the HTTPS preview domain (not the internal HTTP cluster host).
+- **`oauth_states` Mongo collection** with TTL index `expireAfterSeconds=600` — auto-purges abandoned wizard runs.
+- **`postback_secret`** generated per connection at link time — appended to postback URL as `?token=...` for webhook auth.
+- **Live order events** payload truncated >8 KB to prevent broker-side flooding.
+- **`components/BrokerOAuthWizard.jsx`**: 4-step modal (URLs → keys → polling → success/fail). New tab opens broker login; original tab polls `/api/brokers` until status flips. Includes Re-open broker login affordance.
+- **`pages/Brokers.jsx`**: WIZARD button per broker card (amber accent) sits alongside the existing CONNECT button. Non-OAuth brokers (Dhan/ICICI/Rmoney) get the same wizard surfacing redirect/postback URLs + an amber heads-up explaining their manual flow.
+- **Tests**: iter13 — 18/18 backend pytest pass. Frontend Playwright caught two bugs (wizard state leakage across brokers; Dhan DONE button advancing to misleading LINK FAILED screen) — both fixed via state-reset useEffect + onClose branch, re-verified via targeted Playwright assertions.
+- **Status**: OAuth onboarding pipeline complete. Live exchange will work the moment a real Kite/Upstox developer app is provisioned with the displayed redirect URL.
 
 ## Iteration 11 (2026-02-29) — P1 Alerts (Telegram + SMTP email for HIGH-severity events)
 

@@ -23,6 +23,17 @@ export default function BrokerOAuthWizard({ broker, onClose, onLinked }) {
   const startedAt = useRef(0);
 
   useEffect(() => {
+    // Reset all wizard state when the broker prop changes — prevents step/state
+    // leakage across consecutive wizard sessions on different brokers.
+    setStep(1);
+    setCreds({ api_key: "", api_secret: "" });
+    setLinkStatus(null);
+    setAuthWindow(null);
+    setUrls({ redirect_url: "", postback_url: "", oauth_supported: false });
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
     if (!broker) return;
     (async () => {
       try {
@@ -260,7 +271,7 @@ export default function BrokerOAuthWizard({ broker, onClose, onLinked }) {
             <Button
               data-testid="wizard-next-1"
               disabled={!urls.redirect_url}
-              onClick={() => setStep(urls.oauth_supported ? 2 : 4)}
+              onClick={() => urls.oauth_supported ? setStep(2) : onClose?.()}
               className="rounded-none bg-white text-black hover:bg-zinc-200 font-section tracking-wider"
             >
               {urls.oauth_supported ? "NEXT · ENTER KEYS" : "DONE"}
