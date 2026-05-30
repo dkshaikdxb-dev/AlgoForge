@@ -147,8 +147,23 @@ Build a modular & scalable AI-first hybrid algorithmic trading platform with: da
 - **Tests**: 118/118 backend pytest pass. Test agent found+fixed 2 refactor bugs (broker_test awaiting + paper_adapter kwarg rename) inline.
 - **Live trading is one config away** — connect real Kite/Upstox keys via `/brokers` UI, broker_test will return `status='live'`, reconciler will then start ticking it.
 
+## Iteration 10 (2026-02-29) — Super-admin Console (Platform Admin)
+
+User choice: 1a platform super-admin · 2 global audit + system health + risk overrides + broker map · 3b promote-by-flag in DB · 4a separate `admin_events` collection.
+
+- **`routers/admin.py`** (admin-only via `require_admin`): `/admin/health` (Mongo ping, reconciler liveness, LLM key, counts), `/admin/audit` (global user audit feed, paginated), `/admin/risk/users` (every user with kill state + live P&L + exposure from `compute_positions`), `/admin/risk/kill` (force or release kill switch + reason), `/admin/brokers/map` (every broker connection, grouped stats), `/admin/events` (admin_events feed), `/admin/promote` (promote another user to admin).
+- **`services/admin_audit.py`**: append-only `admin_events` collection with `record_admin_event()` + `list_admin_events()`; indexes on `ts`, `admin_id`, `target_user_id`. Every privileged action (force-kill, promote) writes here.
+- **`scripts/promote_admin.py`**: standalone CLI — `python scripts/promote_admin.py demo@algoforge.io`. Used to bootstrap the first admin.
+- **`pages/Admin.jsx`** (`/admin`): 6 health stat cards + 4-tab console (RISK/USERS, BROKER MAP, GLOBAL AUDIT, ADMIN TRAIL). Force-kill button per user row writes admin_events.
+- **`AppShell.jsx`**: sidebar exposes the Admin link only when `user.role==='admin'`.
+- **Tests**: iter10 — 17/17 admin pytest pass (health, audit, risk/users, brokers/map, events, force-kill arm+release, 404, 403 negatives, regression). Frontend Playwright walkthrough green. Total backend pytest: 135+.
+- **Status**: Admin Dashboard complete and E2E validated.
+
 ### Backlog cleared. Future enhancements (open-ended)
-- Telegram alerts for HIGH-severity audit events.
-- Live broker WebSocket order-update streams (Zerodha postbacks / Upstox WS) — wiring path: implement `stream_order_updates()` on each adapter, replace the 30s poll with WS push.
-- Migrate ICICI/Dhan/Rmoney legacy adapters to `BrokerAdapter` ABC (Zerodha/Upstox set the template).
-- Strategy marketplace + plugin SDK + cross-asset (crypto, FX) + DeFi (long horizon).
+- **P1**: Telegram/email alerts for HIGH-severity audit events (user-prioritized — operational alerting).
+- **P1**: Migrate ICICI/Dhan/Rmoney legacy adapters to `BrokerAdapter` ABC (Zerodha/Upstox set the template).
+- **P2**: JWT to httpOnly cookies + CSRF middleware.
+- **P2**: Backtest.jsx / PaperExecution.jsx complexity refactor.
+- **P2**: Live broker WebSocket order-update streams (Zerodha postbacks / Upstox WS).
+- **P2**: RL intraday scalper, voice trading, crypto/FX/DeFi expansion (open-ended).
+- **Test-infra**: backend_test.py TestIter9Refactor needs conftest.py loading .env before brokers package imports (ENCRYPTION_KEY KeyError on standalone pytest).
