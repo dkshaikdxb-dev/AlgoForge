@@ -25,6 +25,7 @@ from routers import (
     alerts as alerts_router,
     audit as audit_router,
     backtest as backtest_router,
+    broker_oauth as broker_oauth_router,
     brokers as brokers_router,
     dashboard as dashboard_router,
     health as health_router,
@@ -84,6 +85,7 @@ api.include_router(trap_router.router)
 api.include_router(paper_router.router)
 api.include_router(journal_router.router)
 api.include_router(brokers_router.router)
+api.include_router(broker_oauth_router.router)
 api.include_router(reconciliation_router.router)
 api.include_router(audit_router.router)
 api.include_router(admin_router.router)

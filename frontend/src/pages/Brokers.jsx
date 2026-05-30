@@ -2,18 +2,20 @@ import { useEffect, useState } from "react";
 import api from "@/lib/api";
 import AppShell from "@/components/AppShell";
 import PageHeader from "@/components/PageHeader";
+import BrokerOAuthWizard from "@/components/BrokerOAuthWizard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter,
 } from "@/components/ui/dialog";
-import { Plug, Loader2, ShieldCheck, ExternalLink, Trash2, KeyRound, RefreshCw, Check } from "lucide-react";
+import { Plug, Loader2, ShieldCheck, ExternalLink, Trash2, KeyRound, RefreshCw, Check, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 
 export default function Brokers() {
   const [items, setItems] = useState([]);
-  const [active, setActive] = useState(null); // broker being edited
+  const [active, setActive] = useState(null); // broker being edited (manual)
+  const [wizardBroker, setWizardBroker] = useState(null);
   const [form, setForm] = useState({});
   const [busy, setBusy] = useState(false);
 
@@ -139,6 +141,15 @@ export default function Brokers() {
                 </div>
                 <div className="flex items-center gap-2 mt-auto">
                   <Button
+                    data-testid={`broker-wizard-${b.name}`}
+                    onClick={() => setWizardBroker(b)}
+                    size="sm"
+                    variant="outline"
+                    className="rounded-none border-amber-500 text-amber-400 hover:bg-amber-500 hover:text-black font-section tracking-wider"
+                  >
+                    <Wand2 className="w-3.5 h-3.5 mr-2" /> WIZARD
+                  </Button>
+                  <Button
                     data-testid={`broker-connect-${b.name}`}
                     onClick={() => openConnect(b)}
                     size="sm"
@@ -247,6 +258,12 @@ export default function Brokers() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <BrokerOAuthWizard
+        broker={wizardBroker}
+        onClose={() => setWizardBroker(null)}
+        onLinked={() => { setWizardBroker(null); load(); }}
+      />
     </AppShell>
   );
 }

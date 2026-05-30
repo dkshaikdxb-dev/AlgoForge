@@ -1,0 +1,35 @@
+{
+  "summary": "Iter 13 broker OAuth wizard tested. Backend: 18/18 pytest pass — URL surface, auth gating, start endpoint shape (kite.zerodha.com + api.upstox.com login URLs), Dhan rejection, callback returns HTML on bad params, postback 403, TTL index on oauth_states. Frontend: Zerodha wizard happy path (step 1 URLs + copy + step 2 keys + Launch enabled) works. BUGS found: (1) Wizard state leaks across brokers — closing modal then opening another broker shows stale step/linkStatus from previous session. (2) Per spec, Dhan DONE button should CLOSE the wizard but currently advances to step 4 LINK FAILED screen.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "BrokerOAuthWizard", "issue": "State (step, creds, linkStatus, urls) is not reset when the broker prop changes. After opening Zerodha and advancing to step 2 (or DONE-> step 4 on Dhan) and closing, opening another broker's wizard renders the stale step from the previous session.", "selector": "[data-testid='oauth-wizard-dialog']", "priority": "HIGH"},
+      {"component": "BrokerOAuthWizard step1 DONE button", "issue": "For non-OAuth brokers (dhan/icici/rmoney) the DONE button calls setStep(4) which renders the 'LINK FAILED' screen (linkStatus is null, so failure branch shows). Per spec it should close the wizard (onClose) since no OAuth was started.", "selector": "[data-testid='wizard-next-1']", "priority": "HIGH"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/test_oauth_iter13.py", "/app/test_reports/pytest/iter13_results.xml"],
+  "action_items": [
+    "Reset wizard internal state when broker prop changes — either keyed remount in parent (`<BrokerOAuthWizard key={wizardBroker?.name} ...>`) OR a useEffect on [broker] that resets step/creds/linkStatus/urls.",
+    "Change non-OAuth branch in step 1: clicking DONE on Dhan/ICICI/Rmoney should call onClose() instead of setStep(4), so user is not shown a misleading 'LINK FAILED' screen.",
+    "Consider also resetting state on dialog close (onOpenChange=false) so reopening same broker starts fresh."
+  ],
+  "critical_code_review_comments": [
+    "BrokerOAuthWizard.jsx: component state persists across broker switches because Dialog open/close does not unmount the component (the wrapper returns null only when broker is null, but state hooks survive between renders). Fix with a remount key or reset effect.",
+    "broker_oauth.py: Kite callback fallback uses `most recent pending row for this broker` ignoring user_id — if two users started OAuth concurrently this could pick the wrong row. Low-risk for now (single demo user) but worth a follow-up to require state on Kite as well via the Kite Connect 'redirect_params' field.",
+    "Postback handler stores raw payload in live_order_events without size limit — consider truncating payload.",
+    "oauth_start stores plaintext api_secret in oauth_states (temporary, 10-min TTL). Acceptable but documented risk."
+  ],
+  "updated_files": ["/app/backend/tests/test_oauth_iter13.py"],
+  "success_rate": {"backend": "100%", "frontend": "75%"},
+  "test_credentials": "demo@algoforge.io / Demo@123 (admin)",
+  "seed_data_creation": "Test oauth_states rows with api_key prefix TEST_ created during runs and cleaned up via fixture.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend OAuth plumbing fully validated. After main agent fixes the two frontend wizard bugs, re-run the playwright sequence: open zerodha wizard -> next to step2 -> Escape -> open dhan wizard (must see step1 with DONE button, not step2 or step4) -> click DONE (must close wizard, NOT show LINK FAILED).",
+  "rca of the issue": {
+    "bug1_state_leak": "In Brokers.jsx, <BrokerOAuthWizard broker={wizardBroker} /> is always mounted. Component returns null when !broker but useState hooks retain their values across the null->broker re-render. When user opens broker A, advances step to 2, closes (broker becomes null), then opens broker B, step is still 2. Fix: <BrokerOAuthWizard key={wizardBroker?.name || 'closed'} ...> OR add useEffect(() => { setStep(1); setCreds({api_key:'',api_secret:''}); setLinkStatus(null); }, [broker?.name]).",
+    "bug2_dhan_done_advances_to_step4": "In BrokerOAuthWizard.jsx line 263: onClick={() => setStep(urls.oauth_supported ? 2 : 4)}. For unsupported brokers it jumps to step 4 which always renders 'LINK FAILED' since linkStatus is null. Per spec the button (labeled DONE) should call onClose?.() instead."
+  }
+}
