@@ -155,9 +155,28 @@ async def login(req: LoginRequest, response: Response):
 
 
 @router.post("/logout")
-async def logout(response: Response, user: Optional[dict] = None):
-    # Stateless JWT — clearing cookies is sufficient for browser-side logout.
+async def logout(
+    response: Response,
+    creds: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    auth_cookie: Optional[str] = Cookie(default=None, alias=AUTH_COOKIE),
+):
+    """Stateless JWT logout — clears browser cookies and audits the event.
+
+    Tolerant of unauthenticated callers (frontend may invoke during cleanup);
+    we still clear cookies but skip the audit row.
+    """
+    user_id = None
+    token = auth_cookie or (creds.credentials if creds else None)
+    if token:
+        try:
+            payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALG])
+            user_id = payload.get("sub")
+        except jwt.PyJWTError:
+            pass
     clear_auth_cookies(response)
+    if user_id:
+        await record_event(user_id, AuditEventType.AUTH_LOGIN, actor="user",
+                           summary="Logout")
     return {"ok": True}
 
 

@@ -1,8 +1,9 @@
 """Cookie/CSRF helpers for the JWT-cookie auth migration.
 
 - Two cookies set on login/register:
-    algoforge_auth  (HttpOnly, Secure, SameSite=Lax, Path=/api) — JWT
-    algoforge_csrf  (non-HttpOnly, Secure, SameSite=Lax, Path=/api) — random nonce
+    algoforge_auth  (HttpOnly, Secure, SameSite=Lax, Path=/) — JWT
+    algoforge_csrf  (non-HttpOnly, Secure, SameSite=Lax, Path=/) — random nonce
+  Path=/ so document.cookie exposes algoforge_csrf to React on any route.
 - Double-submit CSRF middleware enforces equality of `algoforge_csrf` cookie and
   `X-CSRF-Token` header on POST/PUT/PATCH/DELETE under /api, except for an
   exempt-path allowlist (auth endpoints + broker OAuth callback + postback).
