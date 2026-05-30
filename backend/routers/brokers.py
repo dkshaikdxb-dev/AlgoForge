@@ -3,8 +3,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from auth import get_current_user
-from brokers import BrokerUnavailable, decrypt_credentials, encrypt_credentials
-from brokers.base import BrokerAdapter, BrokerError
+from brokers import decrypt_credentials, encrypt_credentials
+from brokers.base import BrokerError
 from brokers.registry import list_brokers, make_client
 from db import get_db, now_iso
 from services.audit import AuditEventType, AuditSeverity, record_event
@@ -69,21 +69,12 @@ async def broker_test(name: str, user: dict = Depends(get_current_user)):
     creds = decrypt_credentials(rec["credentials_enc"])
     try:
         client = make_client(name, creds)
-        # New BrokerAdapter subclasses expose async test_connection().
-        # Legacy adapters may still expose a sync method.
-        result = client.test_connection()
-        if hasattr(result, "__await__"):
-            info = await result
-        else:
-            info = result
+        # All BrokerAdapter subclasses expose async test_connection().
+        info = await client.test_connection()
         status = "live"
         message = info.get("name") or info.get("user_id") or "OK"
     except BrokerError as e:
         # Catches BrokerUnavailable, BrokerAuthError, BrokerOrderRejected, etc.
-        status = "error"
-        message = str(e)
-        info = {"ok": False, "error": message}
-    except BrokerUnavailable as e:
         status = "error"
         message = str(e)
         info = {"ok": False, "error": message}

@@ -1,0 +1,45 @@
+{
+  "summary": "Iter 12 broker adapter migration (Dhan/ICICI/Rmoney → BrokerAdapter ABC) tested end-to-end. All 5 brokers expose unified capabilities shape, graceful unavailable errors instead of 500s, audit events fire with WARN severity, reconciler running, disconnect cleans up. Regression for iter10 (Admin) and iter11 (Alerts) GREEN. Frontend Brokers page renders all 5 broker cards correctly.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "Brokers page → Rmoney card",
+        "issue": "Rmoney displays a 'MULTI-LEG' capability chip even though registry sets supports_options_multi_leg=false (only supports_options=true). The UI appears to be mapping supports_options→MULTI-LEG label or showing the wrong flag. Cosmetic mismatch only — capability list returned by API is correct.",
+        "selector": "Brokers page Rmoney capability chips",
+        "priority": "LOW"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_brokers_iter12.py",
+    "/app/test_reports/pytest/iter12_brokers.xml",
+    "/app/test_reports/pytest/iter12_regression.xml"
+  ],
+  "action_items": [
+    "(LOW) Audit Brokers UI capability-chip mapping: supports_options vs supports_options_multi_leg labels are likely swapped for Rmoney card. Dhan/ICICI/Upstox/Zerodha look consistent."
+  ],
+  "critical_code_review_comments": [
+    "brokers/registry.py duplicates capability dicts: each adapter both declares capabilities() in code AND is overridden in registry.SUPPORTED[*]['capabilities']. Sources can drift. Recommend dropping the registry copy and calling adapter.capabilities() once at list_brokers().",
+    "brokers/rmoney.py: BASE_URL is a placeholder constant. While acceptable for MVP scaffold, surface this as BrokerUnavailable when the env doesn't override it, otherwise every test_connection() will hit a stranger's site. Currently it just 404s — fine for now but worth a TODO/warning.",
+    "brokers/dhan.py & icici.py wrap synchronous SDK calls inside async test_connection without asyncio.to_thread → could block the event loop once real SDKs are installed. Recommend wrapping in await asyncio.to_thread(...) when wiring production."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_brokers_iter12.py"
+  ],
+  "success_rate": {
+    "backend": "100% (10/10 iter12 + 29/29 regression = 39/39)",
+    "frontend": "100% smoke (Brokers, Admin, Settings, Audit pages render)"
+  },
+  "test_credentials": "demo@algoforge.io / Demo@123 (admin)",
+  "seed_data_creation": "Test fixtures connect+disconnect fake creds for all 5 brokers per run; final cleanup test removes all broker_connections rows for the demo user — DB left clean.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "iter12 backend suite at /app/backend/tests/test_brokers_iter12.py covers list shape, connect/test/disconnect, audit events (event_type field NOT 'type'), reconciler health, regression for zerodha/upstox. Auth login response key is access_token. Test loads REACT_APP_BACKEND_URL from /app/frontend/.env directly (do not rely on shell env). Audit endpoint = /api/audit/events, items keyed under 'items'.",
+  "rca of the issue": "N/A — no failing tests. Initial iteration of the test file had two minor self-fixes: (1) loaded REACT_APP_BACKEND_URL from /app/frontend/.env (env var not exported in pytest shell); (2) used event_type field instead of type when filtering audit events."
+}
