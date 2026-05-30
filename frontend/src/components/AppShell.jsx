@@ -11,6 +11,7 @@ import {
   Zap,
   Plug,
   ScrollText,
+  ShieldCheck,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
@@ -24,6 +25,7 @@ const NAV = [
   { to: "/trap", label: "Trap Detection", icon: AlertTriangle, testid: "nav-trap" },
   { to: "/journal", label: "Journal", icon: BookOpen, testid: "nav-journal" },
   { to: "/audit", label: "Audit Log", icon: ScrollText, testid: "nav-audit" },
+  { to: "/admin", label: "Admin", icon: ShieldCheck, testid: "nav-admin", adminOnly: true },
   { to: "/brokers", label: "Brokers", icon: Plug, testid: "nav-brokers" },
   { to: "/settings", label: "Settings", icon: Settings, testid: "nav-settings" },
 ];
@@ -51,7 +53,7 @@ export default function AppShell({ children }) {
         </button>
 
         <nav className="flex-1 py-4 px-2 space-y-1">
-          {NAV.map(({ to, label, icon: Icon, end, testid }) => (
+          {NAV.filter((n) => !n.adminOnly || user?.role === "admin").map(({ to, label, icon: Icon, end, testid }) => (
             <NavLink
               key={to}
               to={to}

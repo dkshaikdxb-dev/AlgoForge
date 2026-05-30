@@ -13,6 +13,7 @@ import PaperExecution from "@/pages/PaperExecution";
 import TrapDetection from "@/pages/TrapDetection";
 import Journal from "@/pages/Journal";
 import AuditLog from "@/pages/AuditLog";
+import Admin from "@/pages/Admin";
 import Brokers from "@/pages/Brokers";
 import Settings from "@/pages/Settings";
 
@@ -55,6 +56,7 @@ function App() {
           <Route path="/trap" element={<ProtectedRoute><TrapDetection /></ProtectedRoute>} />
           <Route path="/journal" element={<ProtectedRoute><Journal /></ProtectedRoute>} />
           <Route path="/audit" element={<ProtectedRoute><AuditLog /></ProtectedRoute>} />
+          <Route path="/admin" element={<ProtectedRoute><Admin /></ProtectedRoute>} />
           <Route path="/brokers" element={<ProtectedRoute><Brokers /></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
           <Route path="*" element={<Navigate to="/" replace />} />

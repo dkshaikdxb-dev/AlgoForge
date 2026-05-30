@@ -21,6 +21,7 @@ from starlette.middleware.cors import CORSMiddleware
 from auth import router as auth_router
 from db import close_db, get_db
 from routers import (
+    admin as admin_router,
     audit as audit_router,
     backtest as backtest_router,
     brokers as brokers_router,
@@ -35,6 +36,7 @@ from routers import (
     stress as stress_router,
     trap as trap_router,
 )
+from services.admin_audit import ensure_indexes as _admin_ensure_indexes
 from services.audit import _ensure_indexes as _audit_ensure_indexes
 from services.reconciler_loop import reconciler_loop
 from ws_feed import router as ws_router
@@ -80,6 +82,7 @@ api.include_router(journal_router.router)
 api.include_router(brokers_router.router)
 api.include_router(reconciliation_router.router)
 api.include_router(audit_router.router)
+api.include_router(admin_router.router)
 api.include_router(dashboard_router.router)
 app.include_router(api)
 
