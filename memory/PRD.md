@@ -159,13 +159,24 @@ User choice: 1a platform super-admin · 2 global audit + system health + risk ov
 - **Tests**: iter10 — 17/17 admin pytest pass (health, audit, risk/users, brokers/map, events, force-kill arm+release, 404, 403 negatives, regression). Frontend Playwright walkthrough green. Total backend pytest: 135+.
 - **Status**: Admin Dashboard complete and E2E validated.
 
+## Iteration 12 (2026-02-29) — Broker Adapter Migration (Dhan / ICICI / Rmoney → BrokerAdapter ABC)
+
+- **`brokers/dhan.py`**, **`brokers/icici.py`**, **`brokers/rmoney.py`** rewritten to inherit `BrokerAdapter`. Each declares `capabilities()`, has async `test_connection / place_order / cancel_order / modify_order / get_orders / get_positions`, and raises typed errors (`BrokerUnavailable` for missing SDK/keys, `BrokerAuthError` for credential failures, `BrokerNetworkError` for rmoney HTTP transport).
+- Mutating paths (`place/cancel/modify`) intentionally raise `BrokerUnavailable` with "not wired yet — pending production verification" until real account smoke tests are run.
+- `brokers/rmoney.py` switched from sync `requests` to async `httpx.AsyncClient` so the call doesn't block the event loop.
+- **`brokers/registry.py`** deduped: capability dicts removed. `list_brokers()` now sources flags from `adapter.capabilities().model_dump()` — single source of truth, can't drift. `make_client(name, creds, user_id=...)` accepts user_id directly.
+- **`routers/brokers.py`** simplified: removed legacy sync/async fallback in `broker_test()` — all 5 adapters now share the async contract.
+- **Tests**: iter12 — 10/10 broker pytest + 29/29 regression (= 39/39). One test report comment about Rmoney MULTI-LEG chip turned out to be a false positive (Rmoney correctly shows no chips because all flags except `supports_options` are false, and `supports_options` isn't in the UI label map).
+- **Status**: All 5 broker adapters now share the same contract. The platform never branches on `isinstance(adapter, LegacyClient)` anywhere.
+
 ### Backlog cleared. Future enhancements (open-ended)
-- **P1**: Migrate ICICI/Dhan/Rmoney legacy adapters to `BrokerAdapter` ABC (Zerodha/Upstox set the template).
 - **P2**: JWT to httpOnly cookies + CSRF middleware.
 - **P2**: Backtest.jsx / PaperExecution.jsx complexity refactor.
-- **P2**: Live broker WebSocket order-update streams (Zerodha postbacks / Upstox WS).
+- **P2**: Live broker WebSocket order-update streams (Zerodha postbacks / Upstox WS) — replace 30s reconciler poll.
+- **P2**: When wiring production Dhan/ICICI: wrap their synchronous SDK calls in `await asyncio.to_thread(...)` so the event loop isn't blocked.
 - **P2**: RL intraday scalper, voice trading, crypto/FX/DeFi expansion (open-ended).
-- **Test-infra**: backend_test.py TestIter9Refactor needs conftest.py loading .env before brokers package imports (ENCRYPTION_KEY KeyError on standalone pytest).
+- **P2**: Move alerts dedup from in-process OrderedDict to Mongo TTL collection if scaling out to multiple uvicorn workers.
+- **Test-infra**: backend_test.py TestIter9Refactor needs conftest.py loading .env before brokers package imports.
 
 ## Iteration 11 (2026-02-29) — P1 Alerts (Telegram + SMTP email for HIGH-severity events)
 
