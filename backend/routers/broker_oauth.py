@@ -103,8 +103,19 @@ class OAuthStartRequest(BaseModel):
     api_secret: str
 
 
-def _kite_login_url(api_key: str) -> str:
-    return f"https://kite.zerodha.com/connect/login?v=3&api_key={api_key}"
+def _kite_login_url(api_key: str, state: str) -> str:
+    """Kite Connect login URL.
+
+    Kite doesn't natively support an OAuth-style `state` parameter on its
+    login URL, but it echoes anything passed via `redirect_params` back to
+    the callback as plain query parameters. We exploit that to round-trip
+    our CSRF state token so concurrent multi-user OAuth flows are isolated.
+
+    See: https://kite.trade/docs/connect/v3/user/#login-flow
+    """
+    from urllib.parse import quote
+    rp = quote(f"state={state}", safe="")
+    return f"https://kite.zerodha.com/connect/login?v=3&api_key={api_key}&redirect_params={rp}"
 
 
 def _upstox_login_url(api_key: str, redirect_url: str, state: str) -> str:
@@ -140,9 +151,9 @@ async def oauth_start(name: str, body: OAuthStartRequest, request: Request, user
     })
     redirect_url = _redirect_url(request, name)
     if name == "zerodha":
-        # Kite ignores `state` in the login URL; we re-derive state from the
-        # most recent pending row for this user on callback.
-        login_url = _kite_login_url(body.api_key)
+        # Kite echoes anything in redirect_params back to the callback, so
+        # we round-trip our CSRF state through it.
+        login_url = _kite_login_url(body.api_key, state)
     else:  # upstox
         login_url = _upstox_login_url(body.api_key, redirect_url, state)
     return {
@@ -286,17 +297,22 @@ async def oauth_callback(
         return HTMLResponse(_auto_close_html(f"{name} OAuth not supported.", ok=False), status_code=400)
 
     db = get_db()
-    # Find the state row. Upstox always sends `state`; Kite does not — fall
-    # back to the most recently created row for this broker.
-    state_row = None
-    if state:
-        state_row = await db.oauth_states.find_one({"_id": state, "broker": name})
-    if state_row is None:
-        state_row = await db.oauth_states.find_one(
-            {"broker": name}, sort=[("created_at", -1)],
+    # Both Kite (via redirect_params=state=...) and Upstox (native state param)
+    # now round-trip the CSRF state token through the callback. We require it.
+    if not state:
+        return HTMLResponse(
+            _auto_close_html(
+                "Missing OAuth state in callback. Re-run the wizard — your broker app must echo state via redirect_params.",
+                ok=False,
+            ),
+            status_code=400,
         )
+    state_row = await db.oauth_states.find_one({"_id": state, "broker": name})
     if state_row is None:
-        return HTMLResponse(_auto_close_html("OAuth state expired. Re-run the wizard.", ok=False), status_code=400)
+        return HTMLResponse(
+            _auto_close_html("OAuth state not found or expired. Re-run the wizard.", ok=False),
+            status_code=400,
+        )
 
     user_id = state_row["user_id"]
     try:

@@ -178,6 +178,13 @@ User choice: 1a platform super-admin · 2 global audit + system health + risk ov
 - **P2**: Kite OAuth callback could match on user_id (currently falls back to most-recent-pending row globally) — re-introduce state via Kite Connect "redirect_params" once a real Kite app is provisioned.
 - **Test-infra**: backend_test.py TestIter9Refactor needs conftest.py loading .env before brokers package imports.
 
+## Iteration 14 (2026-02-29) — Kite OAuth `state` via redirect_params
+
+- **`routers/broker_oauth.py`** `_kite_login_url(api_key, state)` now appends `redirect_params=state%3D{state}` so Kite echoes our CSRF token back to the callback as a regular `state` query param. Upstox already round-tripped state natively; the two flows are now symmetric.
+- Callback **requires** `state` — no more "most-recent-pending-row-for-broker" global fallback. Concurrent multi-user OAuth runs can't collide.
+- 3 negative-path responses verified: (i) start now returns `login_url` containing `redirect_params=state%3D...`; (ii) callback with no `state` → 400 "Missing OAuth state in callback"; (iii) callback with bogus state → 400 "state not found or expired".
+- **Status**: P1 closed. Iter 13's documented "low-risk multi-user race" eliminated.
+
 ## Iteration 13 (2026-02-29) — Broker OAuth Wizard (Zerodha + Upstox)
 
 - **`routers/broker_oauth.py`**: 4 endpoints — `GET /brokers/{name}/oauth/urls` (surfaces redirect_url + postback_url), `POST /brokers/{name}/oauth/start` (returns broker login_url, stashes state in TTL collection), `GET /brokers/{name}/oauth/callback` (exchanges request_token/code via `KiteConnect.generate_session` / Upstox `/v2/login/authorization/token`, persists access_token encrypted, marks LIVE, audit-logs, returns auto-close HTML), `POST /brokers/{name}/postback` (per-connection token, writes to `live_order_events`, audit-logs REJECTED as HIGH severity).
