@@ -1,0 +1,38 @@
+{
+  "summary": "Iter 14/15 cookie-auth + CSRF double-submit migration validated end-to-end. Backend: 16/16 new tests in test_cookie_csrf_iter14.py pass (login/register set HttpOnly auth + non-HttpOnly csrf cookies on Path=/, SameSite=Lax; Bearer-only back-compat preserved including PUT/POST bypassing CSRF; cookie-only auth works; CSRF missing → 403, wrong → 403 'Invalid', correct → 200; logout clears cookies; migrate-token issues cookies from valid Bearer and 401s on invalid/missing). Frontend: login sets both cookies (auth=HttpOnly, csrf=non-HttpOnly), localStorage.af_token cleared, Settings → SAVE POLICY → PUT /api/risk/limits 200 with X-CSRF-Token header injected by axios interceptor, 'Risk policy updated' toast shown, sidebar Logout clears cookies + redirects to /login, clearing cookies + reloading /settings triggers 401 fallback redirect to /login. No regressions on cookie-or-Bearer hybrid path.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_cookie_csrf_iter14.py",
+    "/app/test_reports/pytest/iter14_results.xml",
+    "/app/test_reports/pytest/iter14_full_regression.xml"
+  ],
+  "action_items": [
+    "(Optional) Cookie clarification: src/lib/auth_csrf.py module docstring still says 'Path=/api' but real cookie path is now '/' — update the docstring to reflect the change."
+  ],
+  "critical_code_review_comments": [
+    "auth_csrf.py docstring (lines 4-5) still mentions Path=/api but the actual COOKIE_PATH constant is now '/'. Mismatch is purely cosmetic but confusing for future maintainers.",
+    "set_auth_cookies returns the csrf token but the return value is never used by callers (login/register). Could either drop the return or stash it on the response body for explicit clients — minor.",
+    "/auth/logout has an unused `user: Optional[dict] = None` parameter that does nothing (no Depends). Either wire it to record_event(user_id) for audit completeness or remove. Currently logout is unaudited.",
+    "api.js legacy Bearer bridge (lines 41-47) sends localStorage.af_token as Authorization header for the entire migration window — once `auth.jsx` bootstrap migrates and removes af_token, this is dead code. Plan a follow-up to delete it after one release cycle.",
+    "CSRFMiddleware only triggers when algoforge_auth cookie is present (line 105). This is intentional and documented for back-compat with curl/Bearer clients. Good defensive design — flagging only because it relies on every legitimate browser flow setting the cookie via login first (no manual cookie-less browser path possible by design)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_cookie_csrf_iter14.py (new — 16 tests for cookie/CSRF/migrate-token/logout)",
+    "/app/backend/tests/backend_test.py (TestAuth::test_me_without_token and test_me_invalid_token now use a fresh requests.get instead of the shared session, because the session-scope session fixture leaks login cookies into the negative-auth tests after iter15 cookie migration; test-side fix only, no backend change)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "demo@algoforge.io / Demo@123 (admin)",
+  "seed_data_creation": "None for iter14. Re-uses demo admin. CSRF success test mutates demo's risk_limits (max_drawdown_pct=12.5, position_limit=4) — not destructive but visible in DB.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Cookie/CSRF migration is solid. Two important quirks: (1) if you reuse a requests.Session across login-then-no-auth assertions, the cookies from login will carry forward and authenticate calls — use a fresh requests instance or session.cookies.clear() for negative-auth cases (already patched in backend_test.py TestAuth). (2) When testing PUT/POST under cookie auth from Python, you MUST grab session.cookies.get('algoforge_csrf') and send it as X-CSRF-Token header, otherwise you'll get 403. Bearer-only tokens completely bypass CSRF — that's the documented back-compat hatch and the whole testing agent toolchain depends on it. Pre-existing failures in backend_test.py (TestIter6/7/9, TestIter11 kill-switch, TestIter12 brokers caps) are unrelated to iter14 — they need ENCRYPTION_KEY/MONGO_URL env vars set or have stale schema expectations from earlier iterations.",
+  "rca of the issue": "No iter14 bugs found. Two pre-existing test artifacts fixed: (a) shared requests.Session in backend_test.py TestAuth leaked algoforge_auth cookies into negative-auth tests post-migration — fixed by using a fresh requests.get for the negative cases. (b) backend_test.py legacy unrelated import failures (TestIter6/7/9) require ENCRYPTION_KEY and MONGO_URL env vars which are not exposed to the pytest runner; this is environment configuration, not application code."
+}

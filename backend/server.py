@@ -19,6 +19,7 @@ from fastapi import APIRouter, FastAPI
 from starlette.middleware.cors import CORSMiddleware
 
 from auth import router as auth_router
+from auth_csrf import attach_csrf_middleware
 from db import close_db, get_db
 from routers import (
     admin as admin_router,
@@ -101,7 +102,15 @@ app.include_router(api_ws)
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","),
+    # When CORS_ORIGINS="*" we use a regex matcher so allow_credentials=True
+    # remains valid (Starlette echoes the matched Origin back instead of "*").
+    **(
+        {"allow_origin_regex": ".*"}
+        if os.environ.get("CORS_ORIGINS", "*").strip() == "*"
+        else {"allow_origins": [o.strip() for o in os.environ["CORS_ORIGINS"].split(",") if o.strip()]}
+    ),
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-CSRF-Token"],
 )
+attach_csrf_middleware(app)

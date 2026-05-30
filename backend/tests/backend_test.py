@@ -71,11 +71,14 @@ class TestAuth:
         assert r.json()["email"] == DEMO_EMAIL
 
     def test_me_without_token(self, session):
-        r = session.get(f"{BASE_URL}/api/auth/me")
+        # Use a clean requests instance — the shared session may now hold
+        # algoforge_auth cookies from earlier login/register calls (iter15
+        # cookie-auth migration), which would authenticate the request.
+        r = requests.get(f"{BASE_URL}/api/auth/me")
         assert r.status_code in (401, 403)
 
     def test_me_invalid_token(self, session):
-        r = session.get(f"{BASE_URL}/api/auth/me", headers={"Authorization": "Bearer invalid.token.here"})
+        r = requests.get(f"{BASE_URL}/api/auth/me", headers={"Authorization": "Bearer invalid.token.here"})
         assert r.status_code in (401, 403)
 
 
