@@ -178,6 +178,21 @@ User choice: 1a platform super-admin · 2 global audit + system health + risk ov
 - **P2**: Kite OAuth callback could match on user_id (currently falls back to most-recent-pending row globally) — re-introduce state via Kite Connect "redirect_params" once a real Kite app is provisioned.
 - **Test-infra**: backend_test.py TestIter9Refactor needs conftest.py loading .env before brokers package imports.
 
+### Backlog cleared. Future enhancements (open-ended)
+- **P0 (blocked on keys)**: First live Kite/Upstox connection via the wizard.
+- **P2**: RL intraday scalper, voice trading, crypto/FX/DeFi expansion (open-ended).
+- **Cleanup (iter17+)**: Remove the legacy localStorage Bearer bridge from `api.js` once we're sure no rolling clients hold stale tokens.
+- **Test-infra**: backend_test.py TestIter9Refactor needs conftest.py loading .env before brokers package imports.
+
+## Iteration 16 (2026-02-29) — P2 Triple: asyncio.to_thread + Mongo-TTL Dedup + Backtest/Paper UI Refactor
+
+- **`brokers/{zerodha,upstox,dhan,icici}.py`** — every blocking SDK call now runs via `await asyncio.to_thread(...)`. For ICICI, even `_client()` (which triggers `BreezeConnect.generate_session` network IO) is wrapped. Verified via 10 concurrent `/api/brokers/dhan/test` calls completing in 0.7s with the `/admin/health` endpoint staying responsive under that load.
+- **`services/alerts.py`** — replaced in-process `OrderedDict + asyncio.Lock` dedup with a Mongo `alert_dedup` collection. `_id = dedup_key`, TTL index `created_at_ttl` (`expireAfterSeconds=60`) auto-purges. Inserts that collide raise DuplicateKeyError → treated as "already sent". Now safe across multiple uvicorn workers.
+- **`pages/Backtest.jsx`**: 429 → **256** lines. Extracted `components/backtest/TradeLogTable.jsx`, `AiRiskReviewPanel.jsx`, `StressTestPanel.jsx` (percentile cards + histograms + worst-path chart).
+- **`pages/PaperExecution.jsx`**: 316 → **239** lines. Extracted `components/paper/PositionsTable.jsx` and `OrdersTable.jsx`. Multi-leg builder untouched.
+- **Tests**: iter16 — 5/5 new tests + 73/73 regression = **78/78 backend pytest pass**. Frontend Playwright: all data-testid hooks preserved, MultiLegBuilder intact, kill-switch flow intact, 0 console errors.
+- **Status**: All confirmed P2 backlog (asyncio, Mongo dedup, UI refactor) closed in one iteration.
+
 ## Iteration 15 (2026-02-29) — JWT → HttpOnly Cookies + Double-Submit CSRF (P2 closed)
 
 - **`auth_csrf.py`** (new): `set_auth_cookies(response, jwt)` writes `algoforge_auth` (HttpOnly, Secure, SameSite=Lax, Path=/) and `algoforge_csrf` (non-HttpOnly, same flags), `clear_auth_cookies(response)`, `CSRFMiddleware` enforcing double-submit on `POST/PUT/PATCH/DELETE` under `/api`. Exempt paths: `/api/auth/{login,register,logout,migrate-token}` and any path containing `/oauth/callback` or `/postback` (browser/server-initiated, no CSRF token to provide). Middleware also bypasses CSRF when no `algoforge_auth` cookie is in the request → Bearer-only clients (curl, testing agent) keep working unchanged.
