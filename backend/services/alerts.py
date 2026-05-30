@@ -65,13 +65,17 @@ async def get_prefs(user_id: str) -> dict:
 
 async def save_prefs(user_id: str, prefs: dict) -> dict:
     db = get_db()
+    # Use `is None` so user can explicitly opt out of all event types with [].
+    event_types = prefs.get("event_types")
+    if event_types is None:
+        event_types = DEFAULT_HIGH_EVENT_TYPES
     update = {
         "user_id": user_id,
         "telegram_enabled": bool(prefs.get("telegram_enabled")),
         "telegram_chat_id": (prefs.get("telegram_chat_id") or "").strip(),
         "email_enabled": bool(prefs.get("email_enabled")),
         "email_address": (prefs.get("email_address") or "").strip(),
-        "event_types": prefs.get("event_types") or DEFAULT_HIGH_EVENT_TYPES,
+        "event_types": event_types,
         "min_severity": prefs.get("min_severity") or "HIGH",
         "updated_at": now_iso(),
     }

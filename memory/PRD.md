@@ -160,10 +160,20 @@ User choice: 1a platform super-admin · 2 global audit + system health + risk ov
 - **Status**: Admin Dashboard complete and E2E validated.
 
 ### Backlog cleared. Future enhancements (open-ended)
-- **P1**: Telegram/email alerts for HIGH-severity audit events (user-prioritized — operational alerting).
 - **P1**: Migrate ICICI/Dhan/Rmoney legacy adapters to `BrokerAdapter` ABC (Zerodha/Upstox set the template).
 - **P2**: JWT to httpOnly cookies + CSRF middleware.
 - **P2**: Backtest.jsx / PaperExecution.jsx complexity refactor.
 - **P2**: Live broker WebSocket order-update streams (Zerodha postbacks / Upstox WS).
 - **P2**: RL intraday scalper, voice trading, crypto/FX/DeFi expansion (open-ended).
 - **Test-infra**: backend_test.py TestIter9Refactor needs conftest.py loading .env before brokers package imports (ENCRYPTION_KEY KeyError on standalone pytest).
+
+## Iteration 11 (2026-02-29) — P1 Alerts (Telegram + SMTP email for HIGH-severity events)
+
+- **`services/alerts.py`**: Telegram (httpx → api.telegram.org) + Email (aiosmtplib) transports, fire-and-forget. 60s in-process dedup (OrderedDict), 1 retry on transport failure (skipped for 4xx). `transport_status()` reports configured vs. missing env. Routes to per-user channels AND a global admin mirror (`TELEGRAM_GLOBAL_CHAT_ID`, `SMTP_GLOBAL_RECIPIENT`).
+- **`routers/alerts.py`**: `GET /api/alerts/prefs` (defaults if no row), `PUT /api/alerts/prefs`, `POST /api/alerts/test` (channel ∈ {telegram, email}), `GET /api/alerts/log`.
+- **Audit auto-dispatch hook**: `services/audit.record_event` now schedules `dispatch_event` via `asyncio.create_task` when severity == HIGH. Non-blocking — trading flows are never delayed.
+- **Admin /admin/health**: now includes `alerts` block (telegram/email transport state + global mirrors).
+- **Frontend**: Settings page split into tabs `RISK & PROFILE` / `ALERTS`. `AlertsPanel.jsx` exposes transport status pills, per-channel switches, destination inputs, event-type chips (5 default: KILL_SWITCH, BROKER_DISCONNECT, BASKET_ROLLBACK, RISK_POLICY_CHANGE, OVERRIDE), SEND TEST buttons (disabled when transport unconfigured), Save, and a recent-deliveries log.
+- **`aiosmtplib==3.0.2`** pinned in requirements.txt. Telegram uses existing httpx — no new HTTP client deps.
+- **Tests**: iter11 — 12/12 alerts pytest (defaults, PUT round-trip, test endpoint 4xx with descriptive errors, auth gating, KILL_SWITCH auto-dispatch → alert_log rows, 60s dedup, admin/health.alerts block). 100% backend regression (iter10 admin tests still pass). Frontend Playwright E2E green.
+- **Status**: P1 alerts pipeline complete. Plug in `TELEGRAM_BOT_TOKEN` + `SMTP_*` env vars at deploy time — feature works in degraded mode until then (graceful 400 with descriptive error; audit_log + alert_log keep recording).

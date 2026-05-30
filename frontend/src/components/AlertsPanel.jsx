@@ -59,6 +59,12 @@ export default function AlertsPanel() {
     setBusy(true);
     try {
       await api.put("/alerts/prefs", prefs); // save first so server has latest dest
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Save failed before test");
+      setBusy(false);
+      return;
+    }
+    try {
       await api.post("/alerts/test", { channel });
       toast.success(`Test ${channel} alert dispatched`);
       load();
