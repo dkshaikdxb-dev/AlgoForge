@@ -1,0 +1,35 @@
+{
+  "summary": "Iter16 verified end-to-end. Backend: 5/5 new tests pass (concurrent /api/brokers/dhan/test×10 in 0.7s, /admin/health responsive under load, alert_dedup TTL index 'created_at_ttl' present with expireAfterSeconds=60, kill_switch toggle×10 produces ≤2 dedup'd alert_log rows, legacy OrderedDict removed). Regression: 73/73 prior-iter backend tests pass (after patching iter11 test which was fragile under new persistent dedup). Frontend: Backtest.jsx (256 LOC) and PaperExecution.jsx (239 LOC) render correctly post-refactor — TradeLogTable, AiRiskReviewPanel, StressTestPanel (with percentile cards + histograms + worst-path), PositionsTable, OrdersTable all present with data-testid hooks, MultiLegBuilder intact, kill-switch disables PLACE button, 0 console errors.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter16.py",
+    "/app/test_reports/pytest/iter16_results.xml",
+    "/app/test_reports/pytest/iter16_regression.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "alerts.py correctly uses Mongo TTL collection alert_dedup with createIndex({created_at:1}, expireAfterSeconds=60, name='created_at_ttl'). OrderedDict and in-process lock fully removed — safe for multi-worker uvicorn.",
+    "All four broker adapters (zerodha/upstox/dhan/icici) wrap blocking SDK methods in asyncio.to_thread; icici additionally wraps BreezeConnect.generate_session (network IO at init time). 10 parallel /brokers/dhan/test calls completed in 0.7s with no event-loop stall.",
+    "Backtest.jsx (256) and PaperExecution.jsx (239) cleanly under the 700-line guideline. Extracted components live under components/backtest/ and components/paper/, each with data-testid attributes (bt-trade-log, risk-review-output, stress-results, paper-flatten-btn, paper-kill-switch, order-*).",
+    "Minor: persistent Mongo dedup (60s) makes prior-iter test test_alerts_iter11::test_kill_switch_toggle_emits_alert_log fragile on rapid re-runs — patched by clearing alert_dedup at test start. Consider exposing a debug endpoint to clear dedup for QA, or making min_severity-bypass for tests."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter16.py (new)",
+    "/app/backend/tests/test_alerts_iter11.py (clear alert_dedup at test start for test isolation)"
+  ],
+  "success_rate": {"backend": "100% (78/78)", "frontend": "100% (all critical flows + 0 console errors)"},
+  "test_credentials": "demo@algoforge.io / Demo@123 (admin)",
+  "seed_data_creation": "None beyond existing seed; TEST_AutoStrat strategy used for backtest UI test was pre-seeded.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter16 GREEN. The persistent Mongo TTL dedup means any future test that triggers same-summary alerts within 60s should clear alert_dedup at setup (see patch applied to test_alerts_iter11). Note kill_switch toggle only emits if state actually changes (prev != current) — start with kill_switch=False to guarantee first ARMED fires.",
+  "rca_notes": "Initial test_kill_switch_dedup_functional failure was a test-logic bug (over-broad slice into older alert_log rows), not an app bug. App correctly deduplicated 10 toggles into 2 telegram rows. Fixed slice to exactly `[:added]` based on count delta."
+}

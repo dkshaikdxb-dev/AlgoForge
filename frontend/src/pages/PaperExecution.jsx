@@ -3,6 +3,8 @@ import api from "@/lib/api";
 import AppShell from "@/components/AppShell";
 import PageHeader from "@/components/PageHeader";
 import StatCard from "@/components/StatCard";
+import OrdersTable from "@/components/paper/OrdersTable";
+import PositionsTable from "@/components/paper/PositionsTable";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,10 +12,7 @@ import { Switch } from "@/components/ui/switch";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from "@/components/ui/table";
-import { ShieldAlert, X, ArrowDownUp } from "lucide-react";
+import { ShieldAlert, ArrowDownUp } from "lucide-react";
 import { toast } from "sonner";
 import MultiLegBuilder from "@/components/MultiLegBuilder";
 
@@ -231,84 +230,9 @@ export default function PaperExecution() {
         {/* Multi-leg builder */}
         <MultiLegBuilder symbols={symbols} disabled={risk.kill_switch} onPlaced={load} />
 
-        {/* Positions */}
-        <div className="panel p-5">
-          <div className="flex items-center justify-between mb-3">
-            <div className="overline">Open positions</div>
-            {positions.length > 0 && (
-              <Button data-testid="paper-flatten-btn" variant="ghost" size="sm" onClick={flatten} className="rounded-none text-zinc-400 hover:text-red-400">
-                <X className="w-4 h-4 mr-1" /> FLATTEN ALL
-              </Button>
-            )}
-          </div>
-          <Table>
-            <TableHeader>
-              <TableRow className="border-[var(--border)]">
-                <TableHead className="overline">Symbol</TableHead>
-                <TableHead className="overline">Type</TableHead>
-                <TableHead className="overline text-right">Qty</TableHead>
-                <TableHead className="overline text-right">Avg</TableHead>
-                <TableHead className="overline text-right">LTP</TableHead>
-                <TableHead className="overline text-right">P&L</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {positions.length === 0 && (
-                <TableRow className="border-[var(--border)]">
-                  <TableCell colSpan={6} className="text-center txt-muted py-6">No open positions.</TableCell>
-                </TableRow>
-              )}
-              {positions.map((p) => (
-                <TableRow key={p.id} className="border-[var(--border)]" data-testid={`position-${p.id}`}>
-                  <TableCell className="font-section">{p.symbol}</TableCell>
-                  <TableCell className="font-mono-data text-xs txt-secondary">
-                    {p.instrument_type === "OPT" ? `${p.option_strike} ${p.option_kind}` : "EQ"}
-                  </TableCell>
-                  <TableCell className={`font-mono-data text-right ${p.qty > 0 ? "txt-profit" : "txt-loss"}`}>{p.qty}</TableCell>
-                  <TableCell className="font-mono-data text-right">{fmt(p.avg_price)}</TableCell>
-                  <TableCell className="font-mono-data text-right">{fmt(p.ltp)}</TableCell>
-                  <TableCell className={`font-mono-data text-right ${p.pnl > 0 ? "txt-profit" : p.pnl < 0 ? "txt-loss" : "txt-muted"}`}>{fmt(p.pnl)}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
+        <PositionsTable positions={positions} onFlatten={flatten} />
 
-        {/* Orders */}
-        <div className="panel p-5">
-          <div className="overline mb-3">Recent orders</div>
-          <div className="max-h-72 overflow-auto">
-            <Table>
-              <TableHeader>
-                <TableRow className="border-[var(--border)]">
-                  <TableHead className="overline">Time</TableHead>
-                  <TableHead className="overline">Symbol</TableHead>
-                  <TableHead className="overline">Side</TableHead>
-                  <TableHead className="overline text-right">Qty</TableHead>
-                  <TableHead className="overline text-right">Price</TableHead>
-                  <TableHead className="overline">Status</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {orders.length === 0 && (
-                  <TableRow className="border-[var(--border)]">
-                    <TableCell colSpan={6} className="text-center txt-muted py-6">No orders yet.</TableCell>
-                  </TableRow>
-                )}
-                {orders.map((o) => (
-                  <TableRow key={o.id} className="border-[var(--border)]">
-                    <TableCell className="font-mono-data text-xs">{o.created_at?.slice(11, 19)}</TableCell>
-                    <TableCell className="font-section">{o.symbol}</TableCell>
-                    <TableCell className={`font-section text-xs ${o.side === "BUY" ? "txt-profit" : "txt-loss"}`}>{o.side}</TableCell>
-                    <TableCell className="font-mono-data text-right">{o.qty}</TableCell>
-                    <TableCell className="font-mono-data text-right">{fmt(o.price)}</TableCell>
-                    <TableCell className="font-mono-data text-xs txt-profit">{o.status}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        </div>
+        <OrdersTable orders={orders} />
       </div>
     </AppShell>
   );

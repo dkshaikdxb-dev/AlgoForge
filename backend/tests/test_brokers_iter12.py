@@ -43,6 +43,8 @@ CAPS_KEYS = {
     "supports_postback_ws",
     "supports_options",
     "supports_options_multi_leg",
+    "max_qty_per_order",
+    "min_qty_per_order",
 }
 
 FAKE_CREDS = {
@@ -86,7 +88,10 @@ def test_brokers_list_shape(auth):
         caps = it["capabilities"]
         assert set(caps.keys()) == CAPS_KEYS, f"{it['name']} caps={caps}"
         for k, v in caps.items():
-            assert isinstance(v, bool), f"{it['name']}.{k}={v!r} not bool"
+            if k in ("max_qty_per_order", "min_qty_per_order"):
+                assert v is None or isinstance(v, int), f"{it['name']}.{k}={v!r}"
+            else:
+                assert isinstance(v, bool), f"{it['name']}.{k}={v!r} not bool"
 
 
 # ---- 2/3/4. connect + test flows -------------------------------------------

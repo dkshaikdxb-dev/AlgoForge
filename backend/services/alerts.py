@@ -13,7 +13,6 @@ import asyncio
 import logging
 import os
 import ssl
-from collections import OrderedDict
 from email.message import EmailMessage
 from typing import Any, Optional
 
@@ -25,16 +24,6 @@ from db import get_db, now_iso
 logger = logging.getLogger("algoforge.alerts")
 
 ALERT_DEDUP_SEC = 60
-_dedup: "OrderedDict[str, float]" = OrderedDict()
-_dedup_lock = asyncio.Lock()
-
-DEFAULT_HIGH_EVENT_TYPES = [
-    "KILL_SWITCH",
-    "BROKER_DISCONNECT",
-    "BASKET_ROLLBACK",
-    "RISK_POLICY_CHANGE",
-    "OVERRIDE",
-]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -44,6 +33,22 @@ DEFAULT_HIGH_EVENT_TYPES = [
 async def ensure_indexes() -> None:
     db = get_db()
     await db.alert_preferences.create_index("user_id", unique=True)
+    # alert_dedup: TTL on `created_at`. _id is the dedup key, so duplicate
+    # writes within the window raise DuplicateKeyError → we treat that as
+    # "already sent recently". Works correctly across multiple uvicorn workers.
+    info = await db.alert_dedup.index_information()
+    if "created_at_ttl" not in info:
+        await db.alert_dedup.create_index(
+            "created_at", expireAfterSeconds=ALERT_DEDUP_SEC, name="created_at_ttl"
+        )
+
+DEFAULT_HIGH_EVENT_TYPES = [
+    "KILL_SWITCH",
+    "BROKER_DISCONNECT",
+    "BASKET_ROLLBACK",
+    "RISK_POLICY_CHANGE",
+    "OVERRIDE",
+]
 
 
 async def get_prefs(user_id: str) -> dict:
@@ -84,22 +89,27 @@ async def save_prefs(user_id: str, prefs: dict) -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Dedup
+# Dedup (Mongo TTL — safe across multiple uvicorn workers)
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def _should_send(key: str) -> bool:
-    now = asyncio.get_event_loop().time()
-    async with _dedup_lock:
-        cutoff = now - ALERT_DEDUP_SEC
-        # purge stale entries (keep map bounded)
-        while _dedup and next(iter(_dedup.values())) < cutoff:
-            _dedup.popitem(last=False)
-        if key in _dedup:
-            return False
-        _dedup[key] = now
-        if len(_dedup) > 5000:
-            _dedup.popitem(last=False)
+    """Return True iff this key has not been seen in the last
+    ALERT_DEDUP_SEC seconds. The TTL index on alert_dedup auto-purges rows."""
+    db = get_db()
+    try:
+        await db.alert_dedup.insert_one({"_id": key, "created_at": _utcnow()})
         return True
+    except Exception as e:
+        # DuplicateKeyError (pymongo) → already sent recently. Any other
+        # error is also treated as "skip" to avoid spamming on Mongo blip.
+        if "duplicate key" not in str(e).lower():
+            logger.warning("alert dedup write failed (skipping send): %s", e)
+        return False
+
+
+def _utcnow():
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

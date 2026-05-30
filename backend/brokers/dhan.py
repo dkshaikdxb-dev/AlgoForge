@@ -2,9 +2,12 @@
 
 Test/read paths are wired against the dhanhq SDK; mutating paths
 (place/cancel/modify) raise BrokerUnavailable until production wiring is
-verified against a real account.
+verified against a real account. All blocking SDK calls run via
+asyncio.to_thread so the FastAPI event loop is never stalled.
 """
 from __future__ import annotations
+
+import asyncio
 
 from .base import BrokerAdapter, BrokerAuthError, BrokerUnavailable
 from .schemas import (
@@ -60,7 +63,7 @@ class DhanClient(BrokerAdapter):
     async def test_connection(self) -> dict:
         try:
             sdk = self._client()
-            data = sdk.get_fund_limits()
+            data = await asyncio.to_thread(sdk.get_fund_limits)
         except BrokerUnavailable:
             raise
         except Exception as e:
@@ -80,7 +83,7 @@ class DhanClient(BrokerAdapter):
     async def get_orders(self) -> list[NormalizedOrder]:
         try:
             sdk = self._client()
-            raw = sdk.get_order_list()
+            raw = await asyncio.to_thread(sdk.get_order_list)
         except BrokerUnavailable:
             raise
         except Exception as e:
@@ -110,7 +113,7 @@ class DhanClient(BrokerAdapter):
     async def get_positions(self) -> list[NormalizedPosition]:
         try:
             sdk = self._client()
-            raw = sdk.get_positions()
+            raw = await asyncio.to_thread(sdk.get_positions)
         except BrokerUnavailable:
             raise
         except Exception as e:

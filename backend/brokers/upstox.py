@@ -1,5 +1,11 @@
-"""Upstox v2 adapter — implements BrokerAdapter ABC."""
+"""Upstox v2 adapter — implements BrokerAdapter ABC.
+
+All blocking upstox_client SDK calls are dispatched via asyncio.to_thread so
+the FastAPI event loop is never stalled during real-account wiring.
+"""
 from __future__ import annotations
+
+import asyncio
 
 from .base import BrokerAdapter, BrokerAuthError, BrokerOrderRejected, BrokerUnavailable
 from .schemas import (
@@ -63,7 +69,7 @@ class UpstoxClient(BrokerAdapter):
     async def test_connection(self) -> dict:
         try:
             apis = self._apis()
-            profile = apis["user"].get_profile(api_version="2.0")
+            profile = await asyncio.to_thread(apis["user"].get_profile, api_version="2.0")
         except BrokerUnavailable:
             raise
         except Exception as e:
@@ -87,7 +93,7 @@ class UpstoxClient(BrokerAdapter):
             is_amo=False,
         )
         try:
-            resp = apis["order"].place_order(body=body, api_version="2.0")
+            resp = await asyncio.to_thread(apis["order"].place_order, body=body, api_version="2.0")
         except Exception as e:
             raise BrokerOrderRejected(str(e)) from e
         order_id = getattr(getattr(resp, "data", None), "order_id", None)
@@ -106,7 +112,7 @@ class UpstoxClient(BrokerAdapter):
     async def cancel_order(self, broker_order_id: str) -> NormalizedOrder:
         apis = self._apis()
         try:
-            apis["order"].cancel_order(order_id=broker_order_id, api_version="2.0")
+            await asyncio.to_thread(apis["order"].cancel_order, order_id=broker_order_id, api_version="2.0")
         except Exception as e:
             raise BrokerOrderRejected(str(e)) from e
         return NormalizedOrder(
@@ -128,7 +134,7 @@ class UpstoxClient(BrokerAdapter):
             trigger_price=0,
         )
         try:
-            apis["order"].modify_order(body=body, api_version="2.0")
+            await asyncio.to_thread(apis["order"].modify_order, body=body, api_version="2.0")
         except Exception as e:
             raise BrokerOrderRejected(str(e)) from e
         return NormalizedOrder(
@@ -140,7 +146,7 @@ class UpstoxClient(BrokerAdapter):
     async def get_orders(self) -> list[NormalizedOrder]:
         apis = self._apis()
         try:
-            resp = apis["order"].get_order_book(api_version="2.0")
+            resp = await asyncio.to_thread(apis["order"].get_order_book, api_version="2.0")
         except Exception as e:
             raise BrokerAuthError(str(e)) from e
         items = getattr(resp, "data", []) or []
@@ -167,7 +173,7 @@ class UpstoxClient(BrokerAdapter):
     async def get_positions(self) -> list[NormalizedPosition]:
         apis = self._apis()
         try:
-            resp = apis["portfolio"].get_positions(api_version="2.0")
+            resp = await asyncio.to_thread(apis["portfolio"].get_positions, api_version="2.0")
         except Exception as e:
             raise BrokerAuthError(str(e)) from e
         items = getattr(resp, "data", []) or []

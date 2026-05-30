@@ -3,8 +3,13 @@
 When live: actual order placement and order-book reads via kiteconnect.
 When the SDK is missing or keys absent: BrokerUnavailable is raised cleanly so
 the reconciler tags the broker PENDING_RECONCILE rather than crashing.
+
+All blocking kiteconnect calls are dispatched via asyncio.to_thread so the
+FastAPI event loop is never stalled during real-account wiring.
 """
 from __future__ import annotations
+
+import asyncio
 
 from .base import BrokerAdapter, BrokerAuthError, BrokerOrderRejected, BrokerUnavailable
 from .schemas import (
@@ -62,7 +67,8 @@ class ZerodhaClient(BrokerAdapter):
 
     async def test_connection(self) -> dict:
         try:
-            profile = self._client().profile()
+            kite = self._client()
+            profile = await asyncio.to_thread(kite.profile)
         except BrokerUnavailable:
             raise
         except Exception as e:
@@ -73,7 +79,8 @@ class ZerodhaClient(BrokerAdapter):
         kite = self._client()
         side_map = {"BUY": "BUY", "SELL": "SELL"}
         try:
-            order_id = kite.place_order(
+            order_id = await asyncio.to_thread(
+                kite.place_order,
                 variety="regular",
                 tradingsymbol=req.symbol,
                 exchange=req.exchange,
@@ -103,7 +110,7 @@ class ZerodhaClient(BrokerAdapter):
     async def cancel_order(self, broker_order_id: str) -> NormalizedOrder:
         kite = self._client()
         try:
-            kite.cancel_order(variety="regular", order_id=broker_order_id)
+            await asyncio.to_thread(kite.cancel_order, variety="regular", order_id=broker_order_id)
         except Exception as e:
             raise BrokerOrderRejected(str(e)) from e
         return NormalizedOrder(
@@ -121,7 +128,7 @@ class ZerodhaClient(BrokerAdapter):
         if price is not None:
             kwargs["price"] = price
         try:
-            kite.modify_order(**kwargs)
+            await asyncio.to_thread(lambda: kite.modify_order(**kwargs))
         except Exception as e:
             raise BrokerOrderRejected(str(e)) from e
         return NormalizedOrder(
@@ -133,7 +140,7 @@ class ZerodhaClient(BrokerAdapter):
     async def get_orders(self) -> list[NormalizedOrder]:
         kite = self._client()
         try:
-            raw_orders = kite.orders() or []
+            raw_orders = await asyncio.to_thread(kite.orders) or []
         except Exception as e:
             raise BrokerAuthError(str(e)) from e
         out = []
@@ -161,7 +168,7 @@ class ZerodhaClient(BrokerAdapter):
     async def get_positions(self) -> list[NormalizedPosition]:
         kite = self._client()
         try:
-            data = kite.positions() or {}
+            data = await asyncio.to_thread(kite.positions) or {}
         except Exception as e:
             raise BrokerAuthError(str(e)) from e
         net = data.get("net") or []

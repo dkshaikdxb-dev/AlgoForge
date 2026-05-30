@@ -1,10 +1,13 @@
 """ICICI Direct Breeze adapter — implements BrokerAdapter ABC.
 
-The Breeze SDK is synchronous; we wrap calls and translate errors to typed
+The Breeze SDK is synchronous; we wrap calls in asyncio.to_thread so the
+FastAPI event loop is never stalled, and translate errors to typed
 BrokerError subclasses. Mutating paths are intentionally not wired in the MVP
 scaffold and raise BrokerUnavailable.
 """
 from __future__ import annotations
+
+import asyncio
 
 from .base import BrokerAdapter, BrokerAuthError, BrokerUnavailable
 from .schemas import (
@@ -60,8 +63,8 @@ class ICICIDirectClient(BrokerAdapter):
 
     async def test_connection(self) -> dict:
         try:
-            sdk = self._client()
-            data = sdk.get_customer_details()
+            sdk = await asyncio.to_thread(self._client)
+            data = await asyncio.to_thread(sdk.get_customer_details)
         except BrokerUnavailable:
             raise
         except Exception as e:
@@ -84,8 +87,8 @@ class ICICIDirectClient(BrokerAdapter):
 
     async def get_orders(self) -> list[NormalizedOrder]:
         try:
-            sdk = self._client()
-            raw = sdk.get_order_list()
+            sdk = await asyncio.to_thread(self._client)
+            raw = await asyncio.to_thread(sdk.get_order_list)
         except BrokerUnavailable:
             raise
         except Exception as e:
@@ -114,8 +117,8 @@ class ICICIDirectClient(BrokerAdapter):
 
     async def get_positions(self) -> list[NormalizedPosition]:
         try:
-            sdk = self._client()
-            raw = sdk.get_portfolio_positions()
+            sdk = await asyncio.to_thread(self._client)
+            raw = await asyncio.to_thread(sdk.get_portfolio_positions)
         except BrokerUnavailable:
             raise
         except Exception as e:

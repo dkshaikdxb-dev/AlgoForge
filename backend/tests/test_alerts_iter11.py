@@ -149,6 +149,26 @@ def test_kill_switch_toggle_emits_alert_log(admin_headers):
         "event_types": DEFAULT_EVT, "min_severity": "HIGH",
     }, headers=admin_headers, timeout=15)
 
+    # Iter16 introduced persistent Mongo TTL dedup (60s). Clear any prior dedup
+    # keys for this user so the toggle is guaranteed to dispatch fresh rows.
+    try:
+        import os as _os
+        from pymongo import MongoClient as _MC
+        _mongo = _os.environ.get("MONGO_URL")
+        _dbname = _os.environ.get("DB_NAME")
+        if not (_mongo and _dbname):
+            with open("/app/backend/.env") as _f:
+                for _ln in _f:
+                    _ln = _ln.strip()
+                    if _ln.startswith("MONGO_URL=") and not _mongo:
+                        _mongo = _ln.split("=", 1)[1].strip().strip('"').strip("'")
+                    elif _ln.startswith("DB_NAME=") and not _dbname:
+                        _dbname = _ln.split("=", 1)[1].strip().strip('"').strip("'")
+        if _mongo and _dbname:
+            _MC(_mongo)[_dbname].alert_dedup.delete_many({})
+    except Exception as _e:
+        print(f"warn: could not clear alert_dedup: {_e}")
+
     # Snapshot log size
     before = requests.get(f"{API}/alerts/log", headers=admin_headers, params={"limit": 100}, timeout=15).json()["items"]
     before_n = len(before)
