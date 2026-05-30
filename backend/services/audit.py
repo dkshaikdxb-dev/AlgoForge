@@ -83,7 +83,7 @@ async def record_event(
     """Append an immutable audit row. Best-effort: never raises."""
     try:
         db = get_db()
-        await db.audit_events.insert_one({
+        row = {
             "_id": str(uuid.uuid4()),
             "user_id": user_id or "anonymous",
             "event_type": event_type.value,
@@ -95,7 +95,17 @@ async def record_event(
             "ip": ip,
             "user_agent": user_agent,
             "ts": now_iso(),
-        })
+        }
+        await db.audit_events.insert_one(row)
+        # Fire-and-forget alert dispatch on HIGH severity. Never blocks.
+        if severity == AuditSeverity.HIGH:
+            try:
+                import asyncio as _asyncio
+
+                from services.alerts import dispatch_event
+                _asyncio.create_task(dispatch_event(row))
+            except Exception as e:
+                logger.warning("alert dispatch schedule failed: %s", e)
     except Exception as e:
         # Audit failures must never break trading flows.
         logger.warning("audit insert failed: %s", e)

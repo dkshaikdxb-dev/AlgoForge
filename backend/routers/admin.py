@@ -77,6 +77,9 @@ async def admin_health(admin: dict = Depends(require_admin)):
     health["paper_orders"] = await db.paper_orders.count_documents({})
     health["live_brokers"] = await db.broker_connections.count_documents({"status": "live"})
     health["broker_connections"] = await db.broker_connections.count_documents({})
+    # Alert transport configuration
+    from services.alerts import transport_status
+    health["alerts"] = transport_status()
     return health
 
 
