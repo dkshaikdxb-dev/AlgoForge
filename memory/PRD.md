@@ -184,6 +184,22 @@ User choice: 1a platform super-admin · 2 global audit + system health + risk ov
 - **Cleanup (iter17+)**: Remove the legacy localStorage Bearer bridge from `api.js` once we're sure no rolling clients hold stale tokens.
 - **Test-infra**: backend_test.py TestIter9Refactor needs conftest.py loading .env before brokers package imports.
 
+## Iteration 17 (2026-05-31) — First live broker connection 🎉
+
+- **conftest.py** (`/app/backend/tests/conftest.py`): loads `.env` into `os.environ` at conftest-import time + adds backend root to `sys.path`. Unblocked 15 previously-failing tests in `backend_test.py` (101 → 116 passing) — all the broker/encryption-import-dependent tests that needed `ENCRYPTION_KEY` set before module init.
+- **Live Kite Connect onboarding via wizard** (`demo@algoforge.io`):
+  - Kite app credentials provisioned (api_key + api_secret), redirect URL registered.
+  - Wizard `/oauth/start` armed CSRF state, surfaced `redirect_params=state%3D...` login URL.
+  - User logged in at kite.zerodha.com → callback received `?status=success&request_token=...&state=...` echoed via redirect_params.
+  - `KiteConnect.generate_session()` exchanged request_token → access_token cleanly. Encrypted creds persisted in `broker_connections` (Fernet via `ENCRYPTION_KEY`). State row consumed.
+  - `_finalize_connection` auto-test fired → live ping to Kite `/user/profile` returned `MDG129 / Dada Khalandar Shaik`.
+  - Audit event written: `OAuth linked zerodha: live — Dada Khalandar Shaik`. `postback_secret` minted: `7ud8hBt6OftJXlGrKmhieBAx`.
+- **Verified**: `GET /api/brokers` shows `zerodha connected=true status=live`. `POST /api/brokers/zerodha/test` ping-roundtrip OK. `GET /api/admin/brokers/map` shows the connection with `broker_user_name` & `broker_user_id`. `GET /api/admin/health` reports `reconciler=running broker_connections=1`.
+- **Side-finding**: User saw "Invalid user session — TokenException" on a 2nd click — Kite request_tokens are single-use, the first click had already succeeded (the row was already LIVE before the second click). Wizard auto-close page correctly surfaced Kite's error string from the SDK exception. No code change needed.
+- **Status**: P0 closed. AlgoForge has crossed from "simulation-ready" → "live-trading-ready" for Zerodha. Upstox + Dhan + ICICI + Rmoney remain to be onboarded the same way (Upstox will use the same OAuth wizard; the others use manual CONNECT with their static tokens).
+- **postback URL** to be configured by user in Kite app settings (optional, enables real-time order push from broker instead of 30s reconciler poll):
+  `https://quant-hybrid-trade.preview.emergentagent.com/api/brokers/zerodha/postback?token=7ud8hBt6OftJXlGrKmhieBAx`
+
 ## Iteration 16 (2026-02-29) — P2 Triple: asyncio.to_thread + Mongo-TTL Dedup + Backtest/Paper UI Refactor
 
 - **`brokers/{zerodha,upstox,dhan,icici}.py`** — every blocking SDK call now runs via `await asyncio.to_thread(...)`. For ICICI, even `_client()` (which triggers `BreezeConnect.generate_session` network IO) is wrapped. Verified via 10 concurrent `/api/brokers/dhan/test` calls completing in 0.7s with the `/admin/health` endpoint staying responsive under that load.
