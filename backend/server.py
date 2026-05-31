@@ -28,6 +28,7 @@ from routers import (
     backtest as backtest_router,
     broker_oauth as broker_oauth_router,
     brokers as brokers_router,
+    live_orders as live_orders_router,
     dashboard as dashboard_router,
     health as health_router,
     journal as journal_router,
@@ -58,6 +59,8 @@ async def lifespan(app: FastAPI):
     await _audit_ensure_indexes()
     await _admin_ensure_indexes()
     await _alerts_ensure_indexes()
+    from routers.live_orders import _ensure_indexes as _live_orders_ensure_indexes
+    await _live_orders_ensure_indexes()
     rec_task = _asyncio.create_task(reconciler_loop())
     logger.info("AlgoForge backend started (modular routers, idempotency TTL ready, audit indexed, reconciler running)")
     try:
@@ -84,6 +87,7 @@ api.include_router(stress_router.router)
 api.include_router(risk_router.router)
 api.include_router(trap_router.router)
 api.include_router(paper_router.router)
+api.include_router(live_orders_router.router)
 api.include_router(journal_router.router)
 api.include_router(brokers_router.router)
 api.include_router(broker_oauth_router.router)
