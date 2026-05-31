@@ -184,6 +184,22 @@ User choice: 1a platform super-admin · 2 global audit + system health + risk ov
 - **Cleanup (iter17+)**: Remove the legacy localStorage Bearer bridge from `api.js` once we're sure no rolling clients hold stale tokens.
 - **Test-infra**: backend_test.py TestIter9Refactor needs conftest.py loading .env before brokers package imports.
 
+## Iteration 18 (2026-05-31) — Live Order Routing + Pre-flight Guardrails
+
+- **`routers/live_orders.py`** (new): two-step preview/execute flow against connected live broker.
+  - `POST /api/orders/live/preview` — runs 6 guardrails (kill_switch, broker status=live, daily cap ₹50K, daily count 10/day, valid symbol, valid HMAC), returns HMAC-signed `confirm_token` (60s TTL).
+  - `POST /api/orders/live/execute` — HMAC verify, single-use token via `live_used_tokens` Mongo collection (TTL-purged), re-runs all guardrails, audit row at HIGH severity BEFORE the broker call, places via adapter, persists `live_orders`, audit RESPONSE row HIGH severity.
+  - `typed_confirm: Literal["LIVE"]` Pydantic gate at the API layer — frontend forces user to type "LIVE" in caps.
+  - `correlation_id` ties REQUEST → RESPONSE/REJECT audit rows together.
+- **`brokers/base.py`**: added `async def get_quote(symbol, exchange)` to ABC (default 0.0). Concrete adapters override.
+- **`brokers/zerodha.py`**: implemented `get_quote()` via `kite.ltp([key])` — falls back gracefully when Kite returns "Insufficient permission" (paid market-data add-on required). Surfaces a clear "use LIMIT order with your own price" hint instead of a crash.
+- **`routers/broker_oauth.py`**: new `POST /brokers/{name}/oauth/relink` endpoint — re-uses saved api_key/api_secret to issue a fresh login URL. Kite access tokens expire daily ~6 AM IST; this lets the user one-click refresh.
+- **`components/paper/LiveOrderTicket.jsx`** (new): red-themed order ticket with broker/symbol/side/qty/type/product/price fields. Default = LIMIT for unknown symbols (avoids LTP-add-on requirement). REVIEW LIVE ORDER button opens a confirmation modal that requires typing "LIVE" before EXECUTE is enabled. Disabled when kill_switch is ON or no live broker connection exists.
+- **`pages/PaperExecution.jsx`**: rendered the LiveOrderTicket below the multi-leg builder + a separate "Live orders" listing section.
+- **`pages/Brokers.jsx`**: added RELINK button on connected Zerodha/Upstox cards — opens broker login in popup, polls until status flips back to live.
+- **Smoke tests**: All 5 backend guardrails verified (kill_switch=423, notional cap=400, HMAC tamper=400, missing typed_confirm=422, daily cap=429). LIMIT preview for IDEA × 1 @ ₹15.50 returned proper confirm_token. Frontend modal verified to gate EXECUTE behind `typed === "LIVE"`. Markets closed today; user will fire the live BUY tomorrow.
+- **Status**: P0 live order pipeline complete. Ready for tomorrow's live BUY when markets open.
+
 ## Iteration 17 (2026-05-31) — First live broker connection 🎉
 
 - **conftest.py** (`/app/backend/tests/conftest.py`): loads `.env` into `os.environ` at conftest-import time + adds backend root to `sys.path`. Unblocked 15 previously-failing tests in `backend_test.py` (101 → 116 passing) — all the broker/encryption-import-dependent tests that needed `ENCRYPTION_KEY` set before module init.

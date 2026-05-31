@@ -67,6 +67,37 @@ export default function Brokers() {
     }
   };
 
+  const relink = async (name) => {
+    setBusy(true);
+    try {
+      const { data } = await api.post(`/brokers/${name}/oauth/relink`);
+      const w = window.open(data.login_url, "_blank", "noopener,noreferrer,width=540,height=720");
+      if (!w) {
+        toast.error("Popup blocked — allow popups for AlgoForge and retry");
+        return;
+      }
+      toast.info(`Re-login at ${name.toUpperCase()} — token refresh in progress`);
+      // Poll until connection status flips back to live (or 5 min timeout).
+      const started = Date.now();
+      const t = setInterval(async () => {
+        if (Date.now() - started > 5 * 60 * 1000) { clearInterval(t); return; }
+        try {
+          const { data: br } = await api.get("/brokers");
+          const me = br.items.find((b) => b.name === name);
+          if (me?.status === "live") {
+            clearInterval(t);
+            toast.success(`${name.toUpperCase()} relinked — access token refreshed`);
+            load();
+          }
+        } catch { /* keep polling */ }
+      }, 2500);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Relink failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const disconnect = async (name) => {
     try {
       await api.delete(`/brokers/${name}`);
@@ -169,6 +200,19 @@ export default function Brokers() {
                       >
                         <ShieldCheck className="w-3.5 h-3.5 mr-2" /> TEST
                       </Button>
+                      {(b.name === "zerodha" || b.name === "upstox") && (
+                        <Button
+                          data-testid={`broker-relink-${b.name}`}
+                          onClick={() => relink(b.name)}
+                          disabled={busy}
+                          size="sm"
+                          variant="outline"
+                          className="rounded-none border-amber-500 text-amber-400 hover:bg-amber-500 hover:text-black"
+                          title="Refresh daily access token (Kite/Upstox tokens expire ~6 AM IST)"
+                        >
+                          <RefreshCw className="w-3.5 h-3.5 mr-1" /> RELINK
+                        </Button>
+                      )}
                       <Button
                         data-testid={`broker-reconcile-${b.name}`}
                         onClick={() => reconcile(b.name)}

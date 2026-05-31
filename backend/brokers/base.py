@@ -191,6 +191,12 @@ class BrokerAdapter(ABC):
     @abstractmethod
     async def get_positions(self) -> list[NormalizedPosition]: ...
 
+    # --- optional: live quote (used by /orders/live/preview for notional) ---
+    async def get_quote(self, symbol: str, exchange: str = "NSE") -> float:
+        """Last-traded price for the symbol. Default returns 0.0 → caller
+        falls back to its own price source. Concrete adapters override."""
+        return 0.0
+
     # --- optional stream ---
     async def stream_order_updates(self) -> AsyncIterator[NormalizedOrderEvent]:
         """Override only if `capabilities().supports_postback_ws` is True."""

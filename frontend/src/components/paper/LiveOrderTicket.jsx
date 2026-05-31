@@ -16,8 +16,8 @@ const fmt = (n, d = 2) =>
   (n === null || n === undefined || isNaN(n)) ? "—" : Number(n).toLocaleString("en-IN", { minimumFractionDigits: d, maximumFractionDigits: d });
 
 const initialForm = {
-  broker: "zerodha", symbol: "NIFTY", side: "BUY", qty: 1,
-  order_type: "MARKET", product: "CNC", price: "",
+  broker: "zerodha", symbol: "IDEA", side: "BUY", qty: 1,
+  order_type: "LIMIT", product: "CNC", price: "",
 };
 
 export default function LiveOrderTicket({ liveBrokers, killSwitch, onPlaced }) {
@@ -97,6 +97,11 @@ export default function LiveOrderTicket({ liveBrokers, killSwitch, onPlaced }) {
           KILL SWITCH ACTIVE — live orders disabled. Toggle off in Settings.
         </div>
       )}
+      <div className="border border-zinc-700 bg-zinc-900/40 p-3 text-xs txt-secondary mb-3">
+        <strong className="text-white">Tip:</strong> for symbols outside the mock universe (e.g. IDEA, YESBANK),
+        use <strong className="font-section">LIMIT</strong> orders with your own price so the notional
+        check doesn't depend on Kite's paid market-data add-on.
+      </div>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div>
           <Label className="overline">Broker</Label>

@@ -185,3 +185,14 @@ class ZerodhaClient(BrokerAdapter):
             )
             for p in net if p.get("quantity")
         ]
+
+    async def get_quote(self, symbol: str, exchange: str = "NSE") -> float:
+        """Live LTP via Kite quote API. Used for live-order notional checks."""
+        kite = self._client()
+        key = f"{exchange}:{symbol.upper()}"
+        try:
+            data = await asyncio.to_thread(kite.ltp, [key])
+        except Exception as e:
+            raise BrokerAuthError(str(e)) from e
+        row = (data or {}).get(key) or {}
+        return float(row.get("last_price") or 0.0)

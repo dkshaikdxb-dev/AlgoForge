@@ -78,6 +78,43 @@ async def _ensure_oauth_state_ttl() -> None:
 # 1. URL surface
 # ───────────────────────────────────────────────────────────────────────────
 
+@router.post("/{name}/oauth/relink")
+async def oauth_relink(name: str, request: Request, user: dict = Depends(get_current_user)):
+    """Re-issue an OAuth login URL using saved api_key/api_secret.
+
+    Kite access tokens expire daily ~6 AM IST. This endpoint reads the
+    previously-stored credentials (api_key + api_secret), arms a fresh state
+    row, and returns the broker login URL — so the user just clicks once and
+    logs in, no re-pasting of keys required.
+    """
+    if name not in OAUTH_CAPABLE:
+        raise HTTPException(400, f"{name} does not support OAuth wizard")
+    db = get_db()
+    conn = await db.broker_connections.find_one({"user_id": user["id"], "broker": name})
+    if not conn:
+        raise HTTPException(404, f"No saved {name} connection. Run the wizard first.")
+    creds = decrypt_credentials(conn["credentials_enc"])
+    if not creds.get("api_key") or not creds.get("api_secret"):
+        raise HTTPException(400, "Saved connection is missing api_key / api_secret — re-link via wizard.")
+    await _ensure_oauth_state_ttl()
+    state = secrets.token_urlsafe(24)
+    await db.oauth_states.insert_one({
+        "_id": state, "user_id": user["id"], "broker": name,
+        "api_key": creds["api_key"], "api_secret": creds["api_secret"],
+        "created_at": now_iso(),
+    })
+    redirect_url = _redirect_url(request, name)
+    if name == "zerodha":
+        login_url = _kite_login_url(creds["api_key"], state)
+    else:  # upstox
+        login_url = _upstox_login_url(creds["api_key"], redirect_url, state)
+    return {"state": state, "login_url": login_url, "redirect_url": redirect_url}
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# 1. URL surface (continued)
+# ───────────────────────────────────────────────────────────────────────────
+
 @router.get("/{name}/oauth/urls")
 async def oauth_urls(name: str, request: Request, user: dict = Depends(get_current_user)):
     if name not in SUPPORTED:

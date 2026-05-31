@@ -129,7 +129,34 @@ async def _enforce_guardrails(req: LiveOrderRequest, user: dict) -> dict:
     else:
         est_price = get_last_price(req.symbol)
         if est_price <= 0:
-            raise HTTPException(400, f"Unknown symbol {req.symbol} — cannot estimate notional.")
+            # Symbol not in our mock universe — query the broker for a real
+            # LTP. Requires a live broker connection (already verified) and,
+            # for Kite, the paid market-data add-on. Falls through to a 400
+            # below if the broker returns 0 / lacks the subscription.
+            db = get_db()
+            conn = await db.broker_connections.find_one({"user_id": user["id"], "broker": req.broker})
+            if conn:
+                creds = decrypt_credentials(conn["credentials_enc"])
+                adapter = make_client(req.broker, creds, user_id=user["id"])
+                try:
+                    est_price = await adapter.get_quote(req.symbol, req.exchange)
+                except BrokerError as e:
+                    # Kite returns "Insufficient permission" without the
+                    # market-data add-on. Surface a clear suggestion.
+                    msg = str(e)
+                    if "permission" in msg.lower():
+                        raise HTTPException(
+                            400,
+                            f"Cannot fetch live LTP for {req.symbol} (your broker's market-data plan is not active). "
+                            "Use a LIMIT order with your own price for the notional check.",
+                        ) from e
+                    raise HTTPException(400, f"Could not fetch {req.broker} LTP for {req.symbol}: {e}") from e
+        if est_price <= 0:
+            raise HTTPException(
+                400,
+                f"Unknown symbol {req.symbol} on {req.exchange} — could not estimate notional. "
+                "Switch to LIMIT and provide a price.",
+            )
 
     notional = est_price * req.qty
     if notional > DEFAULT_NOTIONAL_CAP:
