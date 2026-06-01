@@ -262,12 +262,21 @@ async def execute_live_order(req: LiveExecuteRequest, user: dict = Depends(get_c
         placed = await adapter.place_order(norm_req)
     except BrokerError as e:
         await record_event(
-            user["id"], AuditEventType.REJECT, severity=AuditSeverity.HIGH, actor="broker",
+            user["id"], AuditEventType.RESPONSE, severity=AuditSeverity.HIGH, actor="broker",
             summary=f"LIVE REJECTED {req.side} {req.qty} {req.symbol} — {e}",
-            payload={"req": base_req.model_dump(), "error": str(e)},
+            payload={"req": base_req.model_dump(), "error": str(e), "outcome": "rejected"},
             correlation_id=correlation_id,
         )
         raise HTTPException(400, f"Broker rejected: {e}") from e
+    except Exception as e:
+        # Anything else (network blip, SDK bug) — audit and surface a 502.
+        await record_event(
+            user["id"], AuditEventType.RESPONSE, severity=AuditSeverity.HIGH, actor="broker",
+            summary=f"LIVE FAILED {req.side} {req.qty} {req.symbol} — {type(e).__name__}: {e}",
+            payload={"req": base_req.model_dump(), "error": str(e), "outcome": "transport_error"},
+            correlation_id=correlation_id,
+        )
+        raise HTTPException(502, f"Broker call failed: {type(e).__name__}: {e}") from e
 
     # 7. Persist live_orders row.
     placed_dict = placed.model_dump()
