@@ -1,0 +1,78 @@
+# AlgoForge — production stack for self-hosted VPS deployment.
+# One command: `docker compose --env-file .env.production up -d --build`
+#
+# Services:
+#   mongo     — local MongoDB 7 (data persisted to a docker volume)
+#   backend   — FastAPI on :8001 (internal, only nginx reaches it)
+#   frontend  — Nginx serving the React build + reverse-proxy /api/* to backend
+#
+# Required env vars (in .env.production):
+#   DOMAIN                       — public hostname (e.g. algoforge.example.com) or VPS IP
+#   REACT_APP_BACKEND_URL        — e.g. https://algoforge.example.com (NO trailing slash)
+#   JWT_SECRET                   — long random string
+#   ENCRYPTION_KEY               — Fernet key (`python -c "from cryptography.fernet import Fernet;print(Fernet.generate_key().decode())"`)
+#   LLM_PROVIDER                 — direct | emergent
+#   OPENAI_API_KEY               — when LLM_PROVIDER=direct
+#   ANTHROPIC_API_KEY            — when LLM_PROVIDER=direct
+#   EMERGENT_LLM_KEY             — when LLM_PROVIDER=emergent (optional otherwise)
+#   TELEGRAM_BOT_TOKEN           — optional, alerts transport
+#   SMTP_HOST/PORT/USER/PASSWORD/FROM — optional, alerts transport
+
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - mongo-data:/data/db
+    networks:
+      - algoforge
+
+  backend:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.backend
+    restart: unless-stopped
+    environment:
+      MONGO_URL: mongodb://mongo:27017
+      DB_NAME: algoforge
+      JWT_SECRET: ${JWT_SECRET}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      LLM_PROVIDER: ${LLM_PROVIDER:-direct}
+      EMERGENT_LLM_KEY: ${EMERGENT_LLM_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CORS_ORIGINS: ${REACT_APP_BACKEND_URL}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_GLOBAL_CHAT_ID: ${TELEGRAM_GLOBAL_CHAT_ID:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMTP_GLOBAL_RECIPIENT: ${SMTP_GLOBAL_RECIPIENT:-}
+      LIVE_NOTIONAL_CAP: ${LIVE_NOTIONAL_CAP:-50000}
+      LIVE_DAILY_ORDER_LIMIT: ${LIVE_DAILY_ORDER_LIMIT:-10}
+    depends_on:
+      - mongo
+    networks:
+      - algoforge
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.frontend
+      args:
+        REACT_APP_BACKEND_URL: ${REACT_APP_BACKEND_URL}
+    restart: unless-stopped
+    ports:
+      - "80:80"     # behind Cloudflare/Caddy/Certbot-with-Nginx — terminate TLS upstream
+    depends_on:
+      - backend
+    networks:
+      - algoforge
+
+volumes:
+  mongo-data:
+
+networks:
+  algoforge:

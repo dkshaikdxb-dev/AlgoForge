@@ -71,6 +71,9 @@ async def admin_health(admin: dict = Depends(require_admin)):
     health["reconciler"] = "running"
     # LLM key
     health["emergent_llm_key"] = "configured" if os.environ.get("EMERGENT_LLM_KEY") else "missing"
+    # LLM provider mode + per-provider key status (works for both emergent + direct).
+    from llm_provider import status as _llm_status
+    health["llm"] = _llm_status()
     # Counts
     health["users"] = await db.users.count_documents({})
     health["audit_events"] = await db.audit_events.count_documents({})

@@ -1,33 +1,40 @@
-"""LLM wrappers using EmergentLLM key.
+"""LLM wrappers via the llm_provider abstraction.
 
 - GPT-5.2 → translates natural-language strategy into DSL JSON.
 - Claude Sonnet 4.5 → risk analysis, trap commentary, trade journal AI tags.
+
+Set LLM_PROVIDER=emergent (default) for hosted Emergent dev, or
+LLM_PROVIDER=direct with OPENAI_API_KEY + ANTHROPIC_API_KEY for self-hosted.
 """
 from __future__ import annotations
 
 import json
 import os
 import re
-import uuid
 from typing import Any
 
-from emergentintegrations.llm.chat import LlmChat, UserMessage
-
-EMERGENT_KEY = os.environ.get("EMERGENT_LLM_KEY", "")
+from llm_provider import chat as llm_chat
 
 GPT_MODEL = "gpt-5.2"
 CLAUDE_MODEL = "claude-sonnet-4-5-20250929"
 
 
+def _has_provider_key(provider: str) -> bool:
+    mode = os.environ.get("LLM_PROVIDER", "emergent").strip().lower()
+    if mode == "direct":
+        if provider == "openai":
+            return bool(os.environ.get("OPENAI_API_KEY"))
+        return bool(os.environ.get("ANTHROPIC_API_KEY"))
+    return bool(os.environ.get("EMERGENT_LLM_KEY"))
+
+
 def _extract_json(text: str) -> dict | None:
     if not text:
         return None
-    # Try direct
     try:
         return json.loads(text)
     except Exception:
         pass
-    # Find first {...} block (greedy)
     m = re.search(r"\{[\s\S]*\}", text)
     if m:
         try:
@@ -61,15 +68,10 @@ OUTPUT RULES:
 
 
 async def generate_strategy_from_nl(nl_text: str) -> dict:
-    if not EMERGENT_KEY:
+    if not _has_provider_key("openai"):
         return _fallback_strategy(nl_text)
-    chat = LlmChat(
-        api_key=EMERGENT_KEY,
-        session_id=f"strat-{uuid.uuid4()}",
-        system_message=STRATEGY_SYSTEM,
-    ).with_model("openai", GPT_MODEL)
     try:
-        resp = await chat.send_message(UserMessage(text=nl_text))
+        resp = await llm_chat("openai", GPT_MODEL, STRATEGY_SYSTEM, nl_text)
         dsl = _extract_json(resp)
         if not dsl:
             return _fallback_strategy(nl_text, raw=resp)
@@ -79,7 +81,6 @@ async def generate_strategy_from_nl(nl_text: str) -> dict:
 
 
 def _fallback_strategy(nl_text: str, raw: str | None = None, error: str | None = None) -> dict:
-    # safe default — SMA(10) crosses SMA(30) on NIFTY
     return {
         "name": "Auto: SMA Crossover (fallback)",
         "description": "Fallback strategy. " + (error or "AI unavailable; using SMA 10/30 crossover on NIFTY."),
@@ -114,13 +115,8 @@ Return STRICT JSON only with this shape:
 
 
 async def analyse_strategy_risk(dsl: dict, backtest: dict | None = None) -> dict:
-    if not EMERGENT_KEY:
+    if not _has_provider_key("anthropic"):
         return _fallback_risk(dsl, backtest)
-    chat = LlmChat(
-        api_key=EMERGENT_KEY,
-        session_id=f"risk-{uuid.uuid4()}",
-        system_message=RISK_SYSTEM,
-    ).with_model("anthropic", CLAUDE_MODEL)
     payload = {
         "strategy": dsl,
         "backtest_metrics": {
@@ -132,9 +128,8 @@ async def analyse_strategy_risk(dsl: dict, backtest: dict | None = None) -> dict
         } if backtest else None,
     }
     try:
-        resp = await chat.send_message(UserMessage(text=json.dumps(payload)))
-        parsed = _extract_json(resp)
-        return parsed or _fallback_risk(dsl, backtest, raw=resp)
+        resp = await llm_chat("anthropic", CLAUDE_MODEL, RISK_SYSTEM, json.dumps(payload))
+        return _extract_json(resp) or _fallback_risk(dsl, backtest, raw=resp)
     except Exception as e:
         return _fallback_risk(dsl, backtest, error=str(e))
 
@@ -166,25 +161,20 @@ Given trap scan data, produce STRICT JSON only:
 
 
 async def explain_trap(scan: dict) -> dict:
-    if not EMERGENT_KEY:
+    if not _has_provider_key("anthropic"):
         return _fallback_trap_explain(scan)
-    chat = LlmChat(
-        api_key=EMERGENT_KEY,
-        session_id=f"trap-{uuid.uuid4()}",
-        system_message=TRAP_SYSTEM,
-    ).with_model("anthropic", CLAUDE_MODEL)
+    body = {
+        "symbol": scan.get("symbol"),
+        "spot": scan.get("spot"),
+        "overall_trap_score": scan.get("overall_trap_score"),
+        "top_call_traps": scan.get("top_call_traps"),
+        "top_put_traps": scan.get("top_put_traps"),
+        "range_20d": scan.get("range_20d"),
+        "suggestions": scan.get("suggestions"),
+    }
     try:
-        resp = await chat.send_message(UserMessage(text=json.dumps({
-            "symbol": scan.get("symbol"),
-            "spot": scan.get("spot"),
-            "overall_trap_score": scan.get("overall_trap_score"),
-            "top_call_traps": scan.get("top_call_traps"),
-            "top_put_traps": scan.get("top_put_traps"),
-            "range_20d": scan.get("range_20d"),
-            "suggestions": scan.get("suggestions"),
-        })))
-        parsed = _extract_json(resp)
-        return parsed or _fallback_trap_explain(scan, raw=resp)
+        resp = await llm_chat("anthropic", CLAUDE_MODEL, TRAP_SYSTEM, json.dumps(body))
+        return _extract_json(resp) or _fallback_trap_explain(scan, raw=resp)
     except Exception as e:
         return _fallback_trap_explain(scan, error=str(e))
 
@@ -208,16 +198,10 @@ return STRICT JSON:
 
 
 async def journal_commentary(entry: dict) -> dict:
-    if not EMERGENT_KEY:
+    if not _has_provider_key("anthropic"):
         return {"tags": [], "commentary": "AI commentary unavailable."}
-    chat = LlmChat(
-        api_key=EMERGENT_KEY,
-        session_id=f"journal-{uuid.uuid4()}",
-        system_message=JOURNAL_SYSTEM,
-    ).with_model("anthropic", CLAUDE_MODEL)
     try:
-        resp = await chat.send_message(UserMessage(text=json.dumps(entry)))
-        parsed = _extract_json(resp)
-        return parsed or {"tags": [], "commentary": resp[:400] if resp else ""}
+        resp = await llm_chat("anthropic", CLAUDE_MODEL, JOURNAL_SYSTEM, json.dumps(entry))
+        return _extract_json(resp) or {"tags": [], "commentary": (resp or "")[:400]}
     except Exception as e:
         return {"tags": [], "commentary": f"AI error: {e}"}

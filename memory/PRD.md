@@ -184,6 +184,25 @@ User choice: 1a platform super-admin · 2 global audit + system health + risk ov
 - **Cleanup (iter17+)**: Remove the legacy localStorage Bearer bridge from `api.js` once we're sure no rolling clients hold stale tokens.
 - **Test-infra**: backend_test.py TestIter9Refactor needs conftest.py loading .env before brokers package imports.
 
+## Iteration 19 (2026-06-01) — VPS Migration Prep + LLM Provider Abstraction
+
+**Why**: Zerodha Kite Connect rejected live orders because Emergent's shared egress IP (34.170.12.145) is already registered by another developer's app. User cannot register the same IP twice — needs dedicated static IP. Solution: migrate the deployment to their Hostinger VPS at static IP `72.60.103.235`. Emergent does NOT offer dedicated static IPs.
+
+- **Bug fix** (`routers/live_orders.py`): execute endpoint was raising `AttributeError: REJECT` whenever Kite rejected an order, returning 500 instead of the real broker reason. Switched to `AuditEventType.RESPONSE` with severity=HIGH and `outcome=rejected` / `transport_error`. Added a separate `except Exception` branch for transport errors (502). User's retry surfaced the real rejection: "IP not allowed for this app".
+- **`llm_provider.py`** (new): unified `chat(provider, model, system, user)` helper that switches between Emergent Universal Key (`LLM_PROVIDER=emergent`, default) and direct OpenAI/Anthropic SDKs (`LLM_PROVIDER=direct`) based on env. `status()` reports which mode + per-provider key presence.
+- **`ai_service.py`** rewritten: all 4 LLM functions (`generate_strategy_from_nl`, `analyse_strategy_risk`, `explain_trap`, `journal_commentary`) now go through `llm_chat`. Per-provider key checks ensure fallback paths still fire on missing keys. Verified Emergent path still works via `/api/strategies/generate` returning a clean GPT-5.2 RSI strategy.
+- **`routers/admin.py`** `/admin/health.llm` block now reports `{mode, openai/anthropic OR emergent_llm_key}` — so admins know which provider is active.
+- **`requirements.txt`**: added `anthropic==0.105.2`. `openai==1.99.9` already present.
+- **`deploy/`** (new): production Docker artifacts.
+  - `Dockerfile.backend`: Python 3.11 slim, installs requirements, gracefully degrades if `emergentintegrations` CDN install fails (covers `LLM_PROVIDER=direct` case).
+  - `Dockerfile.frontend`: two-stage Node 20 build → Nginx 1.25 alpine, accepts `REACT_APP_BACKEND_URL` build arg.
+  - `nginx.conf`: serves React SPA, reverse-proxies `/api/*` + `/api/ws/*` to `backend:8001`, sets `X-Forwarded-Proto/Host` so OAuth URL derivation works behind TLS-terminating proxies.
+  - `docker-compose.yml`: 3-service stack (mongo, backend, frontend), env-driven, persistent volume for Mongo.
+  - `.env.production.example`: every required env var documented + generation snippets for `JWT_SECRET` and `ENCRYPTION_KEY`.
+  - `README.md`: full end-to-end Hostinger deployment playbook — Docker install, git clone, Cloudflare TLS, Kite IP allowlist update, OAuth wizard re-run, daily ops (logs, Mongo backups, UFW firewall), and "continue developing on Emergent then push to VPS" workflow.
+- **`/app/README.md`**: replaced empty stub with full project overview + pointer to deploy guide.
+- **Status**: Codebase ready for self-hosted deployment. User's next step is "Save to Github" → SSH to VPS → `docker compose up`. Emergent preview remains usable for ongoing development; same commit runs in both environments thanks to the LLM provider switch.
+
 ## Iteration 18 (2026-05-31) — Live Order Routing + Pre-flight Guardrails
 
 - **`routers/live_orders.py`** (new): two-step preview/execute flow against connected live broker.

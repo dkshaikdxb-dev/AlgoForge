@@ -1,0 +1,24 @@
+# Backend Dockerfile — Python 3.11, FastAPI + uvicorn.
+FROM python:3.11-slim AS backend
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1
+
+# System deps needed by some Python wheels (bcrypt, motor, cryptography).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential curl ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app/backend
+COPY backend/requirements.txt ./
+RUN pip install -r requirements.txt && \
+    # emergentintegrations is hosted on a private CDN; keep it optional —
+    # if it can't be installed the LLM_PROVIDER=direct path still works.
+    pip install emergentintegrations --extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/ || \
+    echo "emergentintegrations not installed (OK if LLM_PROVIDER=direct)"
+
+COPY backend/ ./
+
+EXPOSE 8001
+CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8001"]
