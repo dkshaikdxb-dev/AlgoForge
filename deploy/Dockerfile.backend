@@ -16,6 +16,7 @@ WORKDIR /app/backend
 # Strip Emergent-private packages (emergentintegrations is on a private CDN,
 # litellm here uses a private wheel URL) before public-PyPI install. They're
 # only needed for LLM_PROVIDER=emergent which is irrelevant on a self-hosted VPS.
+RUN pip install --no-cache-dir uvicorn
 COPY backend/requirements.txt ./requirements.full.txt
 RUN grep -v -E "^(emergentintegrations|litellm @)" requirements.full.txt > requirements.txt && \
     pip install --upgrade pip && \

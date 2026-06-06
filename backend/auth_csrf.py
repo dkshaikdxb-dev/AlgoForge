@@ -12,6 +12,7 @@
 """
 from __future__ import annotations
 
+import os
 import hmac
 import logging
 import secrets
@@ -55,12 +56,19 @@ def generate_csrf_token() -> str:
 def set_auth_cookies(response: Response, jwt_token: str) -> str:
     """Set both auth + CSRF cookies. Returns the CSRF token (for tests)."""
     csrf = generate_csrf_token()
-    common = {
-        "max_age": COOKIE_MAX_AGE,
-        "path": COOKIE_PATH,
-        "secure": True,
-        "samesite": "lax",
-    }
+
+COOKIE_SECURE = (
+    os.getenv("COOKIE_SECURE", "true").lower() == "true"
+)
+
+common = {
+    "max_age": COOKIE_MAX_AGE,
+    "path": COOKIE_PATH,
+    "secure": COOKIE_SECURE,
+    "samesite": "lax",
+}
+
+
     response.set_cookie(AUTH_COOKIE, jwt_token, httponly=True, **common)
     response.set_cookie(CSRF_COOKIE, csrf, httponly=False, **common)
     return csrf
