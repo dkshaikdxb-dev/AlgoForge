@@ -184,6 +184,20 @@ User choice: 1a platform super-admin · 2 global audit + system health + risk ov
 - **Cleanup (iter17+)**: Remove the legacy localStorage Bearer bridge from `api.js` once we're sure no rolling clients hold stale tokens.
 - **Test-infra**: backend_test.py TestIter9Refactor needs conftest.py loading .env before brokers package imports.
 
+## Iteration 22 (2026-06-07) — Frontend preview fix + 5s auto-refresh
+
+**Preview compile error**: my `// eslint-disable-next-line react-hooks/set-state-in-effect` comment from iter 20 referenced a rule that CRA's bundled ESLint doesn't know about → "rule was not found" hard error on the user's deployed VPS preview. Fixed by:
+- Refactoring `load()` with `useCallback` so the function identity is stable for `useEffect` deps (legitimate React-18 pattern).
+- Replacing the named-rule disable with a block-level `/* eslint-disable */ ... /* eslint-enable */` around the 3 hook-effect blocks. CRA's ESLint accepts the unnamed block.
+
+**5-second auto-refresh** on Dashboard:
+- `autoRefresh` state + setInterval at 5000 ms calling `load({silent: true})` (no spinner / no toast on transient failure).
+- AUTO 5s / PAUSED toggle button (Pause/Play icons) and a manual ↻ refresh button next to the mode toggle.
+- "updated Xs ago" badge driven by a separate 1-second ticker effect — avoids `Date.now()` impurity in render.
+- Verified on preview: badge ticks every second, pause button stops the polling cleanly, manual refresh works while paused.
+
+**Status**: VPS preview ready to receive this commit. After git pull + frontend rebuild, the auto-refresh cockpit feel is live.
+
 ## Iteration 21 (2026-06-02) — Reconciler-cached live positions (P2 closed)
 
 - **`services/reconciler_loop.py`** `_snapshot_positions()`: each 30-s reconciler tick now also snapshots every live broker's positions into a new Mongo collection `live_positions_cache` (per `(user_id, broker)`, with `total_pnl`, `exposure`, `ts`).

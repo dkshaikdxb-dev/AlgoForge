@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "@/lib/api";
 import AppShell from "@/components/AppShell";
@@ -8,10 +8,12 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { LineChart, Line, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
-import { ArrowRight, ShieldAlert, Activity, Sparkles } from "lucide-react";
+import { ArrowRight, ShieldAlert, Activity, Sparkles, Pause, Play, RefreshCw } from "lucide-react";
 
 const fmt = (n, d = 2) =>
   (n === null || n === undefined || isNaN(n)) ? "—" : Number(n).toLocaleString("en-IN", { minimumFractionDigits: d, maximumFractionDigits: d });
+
+const AUTO_REFRESH_MS = 5000;
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -20,9 +22,13 @@ export default function Dashboard() {
   const [trapPreview, setTrapPreview] = useState(null);
   const [mode, setMode] = useState("combined"); // 'paper' | 'live' | 'combined'
   const [loading, setLoading] = useState(true);
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [lastRefresh, setLastRefresh] = useState(null);
+  const [secondsAgo, setSecondsAgo] = useState(0);
 
-  const load = async () => {
-    setLoading(true);
+  // useCallback so the function identity is stable for useEffect deps.
+  const load = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true);
     try {
       const [s, m, t] = await Promise.all([
         api.get("/dashboard/summary"),
@@ -32,17 +38,36 @@ export default function Dashboard() {
       setSummary(s.data);
       setNiftyCandles(m.data.candles);
       setTrapPreview(t.data);
+      setLastRefresh(new Date());
     } catch {
-      toast.error("Failed to load dashboard");
+      if (!silent) toast.error("Failed to load dashboard");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
-  };
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    load();
   }, []);
+
+  /* eslint-disable */
+  // Initial load.
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  // 5-second auto-refresh — silent (no spinner / no toast on failure).
+  useEffect(() => {
+    if (!autoRefresh) return undefined;
+    const id = setInterval(() => { load({ silent: true }); }, AUTO_REFRESH_MS);
+    return () => clearInterval(id);
+  }, [autoRefresh, load]);
+
+  // Tick the "Xs ago" label every second without re-running load().
+  useEffect(() => {
+    if (!lastRefresh) return undefined;
+    const tick = () => setSecondsAgo(Math.max(0, Math.floor((Date.now() - lastRefresh.getTime()) / 1000)));
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [lastRefresh]);
+  /* eslint-enable */
 
   const toggleKill = async (val) => {
     if (!summary?.risk_limits) return;
@@ -95,31 +120,61 @@ export default function Dashboard() {
       />
 
       <div className="p-8 space-y-8" data-testid="dashboard-content">
-        {/* Mode toggle */}
-        <div className="flex items-center gap-1 panel inline-flex p-1 w-fit">
-          {[
-            { v: "paper", label: "PAPER" },
-            { v: "live", label: `LIVE${liveBrokerCount > 0 ? ` · ${liveBrokerCount}` : ""}` },
-            { v: "combined", label: "COMBINED" },
-          ].map((opt) => (
-            <button
-              key={opt.v}
-              data-testid={`dashboard-mode-${opt.v}`}
-              onClick={() => setMode(opt.v)}
-              className={`px-4 py-1.5 text-xs font-section tracking-wider ${
-                mode === opt.v
-                  ? "bg-white text-black"
-                  : "text-zinc-400 hover:text-white"
-              }`}
+        {/* Mode toggle + auto-refresh control */}
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-1 panel inline-flex p-1 w-fit">
+            {[
+              { v: "paper", label: "PAPER" },
+              { v: "live", label: `LIVE${liveBrokerCount > 0 ? ` · ${liveBrokerCount}` : ""}` },
+              { v: "combined", label: "COMBINED" },
+            ].map((opt) => (
+              <button
+                key={opt.v}
+                data-testid={`dashboard-mode-${opt.v}`}
+                onClick={() => setMode(opt.v)}
+                className={`px-4 py-1.5 text-xs font-section tracking-wider ${
+                  mode === opt.v ? "bg-white text-black" : "text-zinc-400 hover:text-white"
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+            {liveBrokerCount === 0 && (
+              <span className="ml-3 text-xs txt-muted self-center">
+                · no live broker connected
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-center gap-3 text-xs font-mono-data">
+            {lastRefresh && (
+              <span className="txt-muted" data-testid="dashboard-last-refresh">
+                updated {secondsAgo}s ago
+              </span>
+            )}
+            <Button
+              data-testid="dashboard-manual-refresh"
+              size="sm"
+              variant="ghost"
+              onClick={() => load()}
+              disabled={loading}
+              className="rounded-none h-7 px-2"
+              title="Refresh now"
             >
-              {opt.label}
-            </button>
-          ))}
-          {liveBrokerCount === 0 && (
-            <span className="ml-3 text-xs txt-muted self-center">
-              · no live broker connected
-            </span>
-          )}
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
+            </Button>
+            <Button
+              data-testid="dashboard-auto-refresh-toggle"
+              size="sm"
+              variant="ghost"
+              onClick={() => setAutoRefresh((v) => !v)}
+              className={`rounded-none h-7 px-2 ${autoRefresh ? "txt-profit" : "txt-muted"}`}
+              title={autoRefresh ? "Pause auto-refresh" : "Resume 5s auto-refresh"}
+            >
+              {autoRefresh ? <Pause className="w-3.5 h-3.5 mr-1" /> : <Play className="w-3.5 h-3.5 mr-1" />}
+              {autoRefresh ? "AUTO 5s" : "PAUSED"}
+            </Button>
+          </div>
         </div>
 
         {/* KPIs */}
