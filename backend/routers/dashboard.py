@@ -1,5 +1,6 @@
 """Dashboard summary endpoint."""
 import logging
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends
 
@@ -13,18 +14,37 @@ from services.paper_trading import compute_positions
 logger = logging.getLogger("algoforge.dashboard")
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
+CACHE_MAX_AGE_SECONDS = 120  # 2× reconciler interval — safe margin
+
 
 async def _live_positions_summary(user_id: str) -> dict:
-    """Merge net qty / P&L across every connected live broker. Best-effort —
-    a broker error never fails the dashboard, it just shows zero for that broker."""
+    """Prefer the reconciler-populated `live_positions_cache`. Fall back to a
+    live broker call only when the cache is missing or stale (>2 min)."""
     db = get_db()
-    conns = await db.broker_connections.find(
-        {"user_id": user_id, "status": "live"}
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=CACHE_MAX_AGE_SECONDS)
+    cached = await db.live_positions_cache.find(
+        {"user_id": user_id, "ts": {"$gte": cutoff}}
     ).to_list(20)
+
+    conns = await db.broker_connections.find(
+        {"user_id": user_id, "status": "live"},
+    ).to_list(20)
+
+    fresh_brokers = {c["broker"] for c in cached}
+    stale_brokers = [c for c in conns if c["broker"] not in fresh_brokers]
+
     positions: list[dict] = []
     total_pnl = 0.0
     exposure = 0.0
-    for conn in conns:
+    sources: list[dict] = []
+
+    for row in cached:
+        positions.extend(row.get("positions", []))
+        total_pnl += row.get("total_pnl", 0) or 0
+        exposure += row.get("exposure", 0) or 0
+        sources.append({"broker": row["broker"], "source": "cache", "ts": row["ts"].isoformat()})
+
+    for conn in stale_brokers:
         broker_name = conn["broker"]
         try:
             creds = decrypt_credentials(conn["credentials_enc"])
@@ -32,9 +52,11 @@ async def _live_positions_summary(user_id: str) -> dict:
             rows = await adapter.get_positions()
         except BrokerError as e:
             logger.info("live positions skipped for %s: %s", broker_name, e)
+            sources.append({"broker": broker_name, "source": "skipped", "error": str(e)})
             continue
         except Exception as e:
             logger.warning("live positions error for %s: %s", broker_name, e)
+            sources.append({"broker": broker_name, "source": "error", "error": str(e)})
             continue
         for p in rows:
             total_pnl += p.pnl or 0
@@ -48,11 +70,14 @@ async def _live_positions_summary(user_id: str) -> dict:
                 "pnl": p.pnl,
                 "product": p.product,
             })
+        sources.append({"broker": broker_name, "source": "fresh"})
+
     return {
         "positions": positions,
         "total_pnl": round(total_pnl, 2),
         "exposure": round(exposure, 2),
         "broker_count": len(conns),
+        "sources": sources,
     }
 
 

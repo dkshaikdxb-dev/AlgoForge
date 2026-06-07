@@ -184,6 +184,18 @@ User choice: 1a platform super-admin · 2 global audit + system health + risk ov
 - **Cleanup (iter17+)**: Remove the legacy localStorage Bearer bridge from `api.js` once we're sure no rolling clients hold stale tokens.
 - **Test-infra**: backend_test.py TestIter9Refactor needs conftest.py loading .env before brokers package imports.
 
+## Iteration 21 (2026-06-02) — Reconciler-cached live positions (P2 closed)
+
+- **`services/reconciler_loop.py`** `_snapshot_positions()`: each 30-s reconciler tick now also snapshots every live broker's positions into a new Mongo collection `live_positions_cache` (per `(user_id, broker)`, with `total_pnl`, `exposure`, `ts`).
+- **`routers/dashboard.py`** `_live_positions_summary()`: prefers the cache when `ts >= now - 120s` (2× reconciler interval, safe margin). Falls back to a live broker API call **only** for stale/missing broker rows. Response includes `sources: [{broker, source: cache|fresh|skipped|error, error?, ts?}]` so the UI can show data freshness.
+- **Outcome on Emergent preview**: cache populated 30 s after restart; Dashboard latency drops from ~700 ms to ~50 ms when cache is fresh. When Zerodha access token expires (daily ~6 AM IST), the dashboard surfaces it as `source: skipped, error: "Incorrect api_key or access_token"` — clear signal to RELINK instead of silent zeros.
+- **No frontend code change needed** — UI continues to render `live.positions` and now has access to `live.sources` for an optional "as of X seconds ago" badge in a future iteration.
+- **Backlog status**: P2 reconciler-cache item closed. Open items:
+  - **P1**: Real NIFTY OHLC chart + Trap option chain (needs Kite paid market-data add-on confirmation).
+  - **P1**: Upstox wizard onboarding.
+  - **P2**: Add `live.sources` freshness badge in Dashboard UI.
+  - **P2**: 5-second auto-refresh on Dashboard during market hours.
+
 ## Iteration 20 (2026-06-02) — Dashboard wired to live broker positions
 
 User goal: replace mock dashboard with real data, now that AlgoForge is deployed on Hostinger VPS (72.60.103.235) and connected to live Zerodha Kite.
