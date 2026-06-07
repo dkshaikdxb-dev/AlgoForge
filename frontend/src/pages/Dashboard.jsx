@@ -18,6 +18,7 @@ export default function Dashboard() {
   const [summary, setSummary] = useState(null);
   const [niftyCandles, setNiftyCandles] = useState([]);
   const [trapPreview, setTrapPreview] = useState(null);
+  const [mode, setMode] = useState("combined"); // 'paper' | 'live' | 'combined'
   const [loading, setLoading] = useState(true);
 
   const load = async () => {
@@ -39,6 +40,7 @@ export default function Dashboard() {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
   }, []);
 
@@ -53,8 +55,16 @@ export default function Dashboard() {
     }
   };
 
-  const pnl = summary?.total_pnl ?? 0;
+  // Pick the right slice based on toggle. Default 'combined' merges paper + live.
+  const slice = (() => {
+    if (!summary) return { total_pnl: 0, exposure: 0, open_positions: 0 };
+    if (mode === "paper") return summary.paper || summary;
+    if (mode === "live") return { ...summary.live, open_positions: summary.live?.positions?.length || 0 };
+    return summary.combined || summary;
+  })();
+  const pnl = slice.total_pnl ?? 0;
   const pnlTone = pnl > 0 ? "profit" : pnl < 0 ? "loss" : "neutral";
+  const liveBrokerCount = summary?.live?.broker_count ?? 0;
 
   return (
     <AppShell>
@@ -85,19 +95,46 @@ export default function Dashboard() {
       />
 
       <div className="p-8 space-y-8" data-testid="dashboard-content">
+        {/* Mode toggle */}
+        <div className="flex items-center gap-1 panel inline-flex p-1 w-fit">
+          {[
+            { v: "paper", label: "PAPER" },
+            { v: "live", label: `LIVE${liveBrokerCount > 0 ? ` · ${liveBrokerCount}` : ""}` },
+            { v: "combined", label: "COMBINED" },
+          ].map((opt) => (
+            <button
+              key={opt.v}
+              data-testid={`dashboard-mode-${opt.v}`}
+              onClick={() => setMode(opt.v)}
+              className={`px-4 py-1.5 text-xs font-section tracking-wider ${
+                mode === opt.v
+                  ? "bg-white text-black"
+                  : "text-zinc-400 hover:text-white"
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+          {liveBrokerCount === 0 && (
+            <span className="ml-3 text-xs txt-muted self-center">
+              · no live broker connected
+            </span>
+          )}
+        </div>
+
         {/* KPIs */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <StatCard
             testid="kpi-total-pnl"
-            label="Total P&L (Paper)"
+            label={`Total P&L (${mode})`}
             value={`₹${fmt(pnl)}`}
-            sub={`across ${summary?.open_positions ?? 0} positions`}
+            sub={`across ${slice.open_positions ?? 0} positions`}
             tone={pnlTone}
           />
           <StatCard
             testid="kpi-exposure"
-            label="Exposure"
-            value={`₹${fmt(summary?.exposure ?? 0, 0)}`}
+            label={`Exposure (${mode})`}
+            value={`₹${fmt(slice.exposure ?? 0, 0)}`}
             sub="net notional value"
           />
           <StatCard
@@ -178,6 +215,46 @@ export default function Dashboard() {
             </div>
           </div>
         </div>
+
+        {/* Live broker positions */}
+        {summary?.live?.positions?.length > 0 && (
+          <div className="panel p-5" data-testid="dashboard-live-positions">
+            <div className="flex items-center justify-between mb-3">
+              <div className="overline txt-loss">Live broker positions · real money</div>
+              <span className="text-xs font-mono-data txt-loss border border-red-500/40 px-2 py-0.5">
+                {summary.live.positions.length} OPEN
+              </span>
+            </div>
+            <div className="space-y-1 text-xs font-mono-data">
+              <div className="grid grid-cols-7 gap-2 txt-muted border-b border-[var(--border)] pb-2 overline">
+                <span>Broker</span>
+                <span>Symbol</span>
+                <span>Product</span>
+                <span className="text-right">Qty</span>
+                <span className="text-right">Avg</span>
+                <span className="text-right">LTP</span>
+                <span className="text-right">P&L</span>
+              </div>
+              {summary.live.positions.map((p, i) => (
+                <div
+                  key={`${p.broker}-${p.symbol}-${i}`}
+                  className="grid grid-cols-7 gap-2 py-1.5 border-b border-[var(--border)]"
+                  data-testid={`dashboard-live-pos-${i}`}
+                >
+                  <span className="font-section">{p.broker.toUpperCase()}</span>
+                  <span>{p.symbol}</span>
+                  <span className="txt-muted">{p.product}</span>
+                  <span className={`text-right ${p.qty > 0 ? "txt-profit" : "txt-loss"}`}>{p.qty}</span>
+                  <span className="text-right">{fmt(p.avg_price)}</span>
+                  <span className="text-right">{fmt(p.last_price)}</span>
+                  <span className={`text-right ${p.pnl > 0 ? "txt-profit" : p.pnl < 0 ? "txt-loss" : ""}`}>
+                    {fmt(p.pnl)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Risk strip */}
         {summary?.risk_limits && (

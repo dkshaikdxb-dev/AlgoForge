@@ -184,6 +184,23 @@ User choice: 1a platform super-admin · 2 global audit + system health + risk ov
 - **Cleanup (iter17+)**: Remove the legacy localStorage Bearer bridge from `api.js` once we're sure no rolling clients hold stale tokens.
 - **Test-infra**: backend_test.py TestIter9Refactor needs conftest.py loading .env before brokers package imports.
 
+## Iteration 20 (2026-06-02) — Dashboard wired to live broker positions
+
+User goal: replace mock dashboard with real data, now that AlgoForge is deployed on Hostinger VPS (72.60.103.235) and connected to live Zerodha Kite.
+
+- **`routers/dashboard.py`** `_live_positions_summary()`: iterates every `status=live` broker connection for the user, calls `adapter.get_positions()` via `asyncio.to_thread`, sums `pnl` + `abs(qty*last_price)` exposure. Best-effort: any broker error is logged and zeroed-out for that broker — the dashboard never errors.
+- **Response shape**: `{paper:{...}, live:{positions[], total_pnl, exposure, broker_count}, combined:{...}}`. Legacy top-level `total_pnl/exposure/open_positions` retained for backward compat.
+- **Frontend `Dashboard.jsx`**: new **PAPER / LIVE / COMBINED** segmented toggle at the top. KPI cards (Total P&L, Exposure, Positions) re-key off the selected slice. Shows "no live broker connected" hint when broker_count=0.
+- **New "Live broker positions" table**: renders only when `summary.live.positions.length > 0`. Red-themed, columns: Broker, Symbol, Product, Qty, Avg, LTP, P&L. Pulled real-time from the connected broker's positions endpoint.
+- **Verified** on Emergent preview: `/api/dashboard/summary` returns `live.broker_count: 1` (Kite detected), `live.positions: []` (no open positions right now). Once VPS-deployed with active Kite positions, they'll render in the new table.
+- **Still mock** (acknowledged): NIFTY 90D OHLCV chart + Trap detection option chain — both require Kite's paid historical/quote add-on. Tracked in backlog as Path B.
+
+### Backlog after iter 20
+- **P1**: Path B real market data (Kite historical OHLC + quote API) — requires user's paid market-data add-on subscription confirmation.
+- **P1**: Upstox wizard onboarding (same flow as Kite).
+- **P2**: Reconciler should refresh `live.positions` cache so Dashboard doesn't make 1 broker API call per page load (rate-limit safety on busy days).
+- **P2**: Add chart of intra-day P&L curve from `live_orders` collection.
+
 ## Iteration 19 (2026-06-01) — VPS Migration Prep + LLM Provider Abstraction
 
 **Why**: Zerodha Kite Connect rejected live orders because Emergent's shared egress IP (34.170.12.145) is already registered by another developer's app. User cannot register the same IP twice — needs dedicated static IP. Solution: migrate the deployment to their Hostinger VPS at static IP `72.60.103.235`. Emergent does NOT offer dedicated static IPs.
