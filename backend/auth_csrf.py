@@ -52,22 +52,20 @@ EXEMPT_CSRF_PATHS_CONTAINS = (
 def generate_csrf_token() -> str:
     return secrets.token_urlsafe(32)
 
-
 def set_auth_cookies(response: Response, jwt_token: str) -> str:
     """Set both auth + CSRF cookies. Returns the CSRF token (for tests)."""
     csrf = generate_csrf_token()
 
-COOKIE_SECURE = (
-    os.getenv("COOKIE_SECURE", "true").lower() == "true"
-)
+    COOKIE_SECURE = (
+        os.getenv("COOKIE_SECURE", "true").lower() == "true"
+    )
 
-common = {
-    "max_age": COOKIE_MAX_AGE,
-    "path": COOKIE_PATH,
-    "secure": COOKIE_SECURE,
-    "samesite": "lax",
-}
-
+    common = {
+        "max_age": COOKIE_MAX_AGE,
+        "path": COOKIE_PATH,
+        "secure": COOKIE_SECURE,
+        "samesite": "lax",
+    }
 
     response.set_cookie(AUTH_COOKIE, jwt_token, httponly=True, **common)
     response.set_cookie(CSRF_COOKIE, csrf, httponly=False, **common)
