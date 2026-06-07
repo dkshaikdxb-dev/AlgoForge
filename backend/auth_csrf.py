@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hmac
 import logging
+import os
 import secrets
 from typing import Callable
 
@@ -30,6 +31,13 @@ CSRF_COOKIE = "algoforge_csrf"
 CSRF_HEADER = "X-CSRF-Token"
 COOKIE_PATH = "/"
 COOKIE_MAX_AGE = 60 * 60 * 24 * 7  # 7 days — matches JWT TTL
+
+# Set COOKIE_SECURE=false on HTTP-only deployments (e.g. plain VPS IP without
+# TLS). Default True for production. SameSite=Lax doesn't require Secure, so
+# the auth flow still works without it; the only loss is XSS-defence-in-depth
+# in MITM scenarios — irrelevant on localhost-style same-origin testing.
+def _cookie_secure() -> bool:
+    return os.environ.get("COOKIE_SECURE", "true").strip().lower() not in ("false", "0", "no")
 
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS", "TRACE"}
 
@@ -55,10 +63,11 @@ def generate_csrf_token() -> str:
 def set_auth_cookies(response: Response, jwt_token: str) -> str:
     """Set both auth + CSRF cookies. Returns the CSRF token (for tests)."""
     csrf = generate_csrf_token()
+    secure = _cookie_secure()
     common = {
         "max_age": COOKIE_MAX_AGE,
         "path": COOKIE_PATH,
-        "secure": True,
+        "secure": secure,
         "samesite": "lax",
     }
     response.set_cookie(AUTH_COOKIE, jwt_token, httponly=True, **common)
