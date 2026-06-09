@@ -136,7 +136,7 @@ async def reconcile_orders(adapter, user_id: str) -> dict:
     for bid, ld in local_by_bid.items():
         if bid in remote_by_bid:
             continue
-        if ld.get("status") in (OrderStatus.FILLED.value, OrderStatus.CANCELLED.value):
+        if ld.get("status") in (OrderStatus.FILLED.value, OrderStatus.CANCELLED.value, OrderStatus.REJECTED.value):
             continue
         await db.live_orders.update_one(
             {"_id": ld["_id"]},
