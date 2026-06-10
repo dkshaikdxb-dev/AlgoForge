@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Sparkles, Save, Play, Trash2, Loader2 } from "lucide-react";
+import { Sparkles, Save, Play, Trash2, Loader2, Rocket } from "lucide-react";
 import { toast } from "sonner";
 
 const EXAMPLES = [
@@ -74,6 +74,28 @@ export default function StrategyBuilder() {
     sessionStorage.setItem("af_backtest_dsl", JSON.stringify({ dsl: s.dsl, id: s.id, name: s.name }));
     navigate("/backtest");
   };
+const deployPaper = async (s) => {
+  try {
+    const { data } = await api.post(
+      "/strategy-deployments/deploy",
+      {
+        strategy_id: s.id,
+        mode: "paper",
+      }
+    );
+
+    toast.success("Strategy deployed to paper mode");
+
+    console.log("DEPLOYMENT", data);
+  } catch (e) {
+    console.error(e);
+
+    toast.error(
+      e?.response?.data?.detail ||
+      "Deployment failed"
+    );
+  }
+};
 
   return (
     <AppShell>
@@ -176,7 +198,20 @@ export default function StrategyBuilder() {
                     >
                       <Play className="w-3.5 h-3.5" />
                     </Button>
+
+
                     <Button
+                      data-testid={`strategy-deploy-${s.id}`}
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => deployPaper(s)}
+                      className="rounded-none h-8 px-2 text-emerald-400 hover:text-emerald-300"
+                    >
+                    <Rocket className="w-3.5 h-3.5" />
+                    </Button>
+
+
+                      <Button
                       data-testid={`strategy-delete-${s.id}`}
                       size="sm"
                       variant="ghost"

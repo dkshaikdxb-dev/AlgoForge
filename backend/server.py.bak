@@ -97,9 +97,8 @@ api.include_router(audit_router.router)
 api.include_router(admin_router.router)
 api.include_router(alerts_router.router)
 api.include_router(dashboard_router.router)
-api.include_router(strategy_deployments_router.router)
-
 app.include_router(api)
+api.include_router(strategy_deployments_router.router)
 
 # WebSocket router mounted under /api (ingress routes /api/* to backend)
 api_ws = APIRouter(prefix="/api")

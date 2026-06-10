@@ -6,6 +6,8 @@ and lifecycle hooks. Keep it boring.
 from __future__ import annotations
 
 from routers import strategy_deployments as strategy_deployments_router
+
+
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -97,8 +99,6 @@ api.include_router(audit_router.router)
 api.include_router(admin_router.router)
 api.include_router(alerts_router.router)
 api.include_router(dashboard_router.router)
-api.include_router(strategy_deployments_router.router)
-
 app.include_router(api)
 
 # WebSocket router mounted under /api (ingress routes /api/* to backend)
